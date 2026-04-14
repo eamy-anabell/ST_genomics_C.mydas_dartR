@@ -1,35 +1,31 @@
-###MODIFICADO Y CHECKEADO 30-03-2026
+###MODIFICADO Y CHECKEADO 13-04-2026
 rm(list = ls())
 setwd("C:/Users/eamy1/Downloads/ST/data")
 
 library(dartR)
 library(adegenet)   # para DAPC más adelante si lo necesitas
 
-"C:\Users\eamy1\Downloads\ST\data\iddata_fg.txt"
-
-# 1. Carga SOLO los genotipos (sin el ind.metafile por ahora)
+# Cargar solo genotipos
 gl_v3 <- gl.read.dart(filename = "Report_DStu19-4381_SNP_mapping_1.csv")
 
-# 2. Metadatos en un objeto aparte
-#sep = "\t" se usa en funciones como read.table() para cargar archivos
-#donde las columnas están separadas por tabulaciones
+# Metadatos en un objeto aparte
+#sep = "\t" se usa en funciones como read.table() para cargar archivos donde las columnas están separadas por tabulaciones.
 meta_temp <- read.table("iddata_fgg.txt", header = TRUE, sep = "\t")
 
-# 3. Primera columna sea 'id' y coincida con los genotipos
+# Primera columna sea 'id' y coincida con los genotipos
 #El orden de los IDs en el .txt debe ser el mismo que en el .csv
 colnames(meta_temp)[1] <- "id"
 
-# 4. Inyectamos los metadatos manualmente al objeto genlight
+# Asignación de metadatos manualmente al objeto genlight
 gl_v3@other$ind.metrics <- meta_temp
 
 # Lista los nombres de los objetos guardados en 'other'
 names(gl_v3@other)
 
-# 5. Si tienes una columna de población (ej. 'pop'), asígnale el nombre correcto
-# Asumiendo que tu columna de población se llama 'pop' en el .txt:
+# Se asigna el nombre de la columna de población ('pop')
 pop(gl_v3) <- meta_temp$pop
 
-# Verifica si ahora el objeto es válido
+# Verificar si el objeto es válido
 print(gl_v3)
 
 # Genlight object
@@ -51,26 +47,15 @@ gl2 <- gl.filter.maf(gl1,
                      verbose   = 3)
 
 gl2 #39,103 SNPs
-
-# Si pones --maf 0.05, le estás diciendo a VCFtools: "Solo quédate con los SNPs
-#donde el alelo raro aparezca en al menos el 5% del total de alelos de la población".
-#En nuestro caso, con 95 individuos (que son 190 alelos, porque cada individuo es 
-#diploide), un MAF de 0.05 significa que el SNP debe aparecer al menos en 9 o 10 
-#alelos (aprox. 5 individuos heterocigotos).
+# --maf 0.05, indica: "Solo quédate con los SNPs donde el alelo raro aparezca en al menos el 5% del total de alelos de la población".
 
 # ) Filter by locus
 gl3 <- gl.filter.callrate(gl2, method = "loc", threshold = 0.85, verbose=3) #remocion de loci con mas de 10% de datos faltantes
 gl3 # 13,900 loci
 
-
 # 4) Filter per individual
 gl4 <- gl.filter.callrate(gl3, method="ind", threshold = 0.90, recalc = TRUE, mono.rm = TRUE)  #remocion de individuos con mas de 15% de datos faltantes.
 gl4 #159 ind,  13,886 loci
-
-# gl4 es el dataset filtrado según el paper
-nInd(gl4)  #159 individuos 
-nLoc(gl4)  #13,886 locis
-
 
 # 5) Filter by monomorphic loci
 gl5 <- gl.filter.monomorphs(gl4)
@@ -99,7 +84,7 @@ library(ggplot2)
 library(ggthemes)
 library(dplyr) 
 
-# --- PREPARACIÓN DE DATOS ---
+# --- PREPARACIÓN DE DATOS ----------------------------------------------
 gl6_imp <- gl.impute(gl6_3, method = "neighbour")
 pcoa_res <- gl.pcoa(gl6_imp, nfactors = 5)
 
