@@ -57,17 +57,17 @@ saveRDS(gl6, file = "gl6_v6_filtrado_call.rds")
 table(pop(gl6))
 
 # ============================================================
-# gl7. SUBCONJUNTO: MORFOTIPO NEGRO - NCEPGL
+# 7. SUBCONJUNTO: MORFOTIPO NEGRO - NCEPGL
 # ============================================================
-
+gl6_neutral
 # Revisar las poblaciones
-table(pop(gl6))
+table(pop(gl6_neutral))
 
 # Seleccionar individuos pertenecientes a NCEPGL
-ind_NCEPGL <- indNames(gl6)[pop(gl6) == "NCEPGL"]
+ind_NCEPGL <- indNames(gl6_neutral)[pop(gl6_neutral) == "NCEPGL"]
 
 # Crear nuevo objeto únicamente con NCEPGL
-gl6_NCEPGL <- gl.keep.ind(gl6, ind_NCEPGL)
+gl6_NCEPGL <- gl.keep.ind(gl6_neutral, ind_NCEPGL)
 
 # Verificar resultado
 gl6_NCEPGL
@@ -119,21 +119,21 @@ gl9_NCEPGL <- gl.filter.maf(
   verbose = 3
 )
 
-gl9_NCEPGL
+gl9_NCEPGL #8847
 
 nInd(gl9_NCEPGL)
 nLoc(gl9_NCEPGL)
 
 gl10_NCEPGL <- gl.filter.monomorphs(gl9_NCEPGL)
 
-gl10_NCEPGL
+gl10_NCEPGL 
 
-nInd(gl10_NCEPGL)
-nLoc(gl10_NCEPGL)
+nInd(gl10_NCEPGL) #96
+nLoc(gl10_NCEPGL) #8847
 
 saveRDS(
   gl10_NCEPGL,
-  file = "gl10_NCEPGL_QC.rds"
+  file = "gl10_neu_NCEPGL_QC.rds"
 )
 
 gl10_NCEPGL
@@ -141,18 +141,20 @@ gl10_NCEPGL
 nInd(gl10_NCEPGL)
 nLoc(gl10_NCEPGL)
 
-table(pop(gl10_NCEPGL))
-
-
-
-
 # ============================================================
-# NCEPGL: PCoA
+# NCEPGL: COMPARACIÓN MAF 0.001 vs 0.05
+# PCoA + DAPC
+# ============================================================
+
+library(dartR)
+library(adegenet)
+
 # ------------------------------------------------------------
 # 0. Cargar dataset NCEPGL
-# ============================================================
+# ------------------------------------------------------------
 
-gl6_NCEPGL <- readRDS("gl6_NCEPGL.rds")
+gl6_NCEPGL <- readRDS("gl6_neu_NCEPGL.rds")
+
 gl6_NCEPGL
 
 nInd(gl6_NCEPGL)
@@ -160,10 +162,10 @@ nLoc(gl6_NCEPGL)
 
 table(pop(gl6_NCEPGL))
 
-## PCoA con filtrado de NCEPGL
+## PCoA con gl6_s (filtrado básico)
 class(gl10_NCEPGL)
 gl10_NCEPGL
-gl10_NCEPGL_imp <- gl.impute(gl10_NCEPGL, method = "neighbour") #imputar NA
+gl10_NCEPGL_imp <- gl.impute(gl10_NCEPGL, method = "neighbour") #Solo si es que se quiere imputar NA
 gl10_NCEPGL_imp
 #PCoA (5 ejes a guardar)
 pcoa_gl10_NCEPGL <- gl.pcoa(gl10_NCEPGL, nfactors = 5)
@@ -175,14 +177,11 @@ g1 <- gl.pcoa.plot(
   pcoa_gl10_NCEPGL,
   gl10_NCEPGL_imp,
   scale      = TRUE,
-  pop.labels = "pop",   # o el nombre del factor de población en @other$ind.metrics
+  pop.labels = "pop",   # o el nombre de tu factor de población en @other$ind.metrics
   xaxis      = 1,
   yaxis      = 2,
   ellipse    = TRUE
 )
-
-# Corregir proporciones de ejes
-g1 + coord_fixed(ratio = 1)
 
 # 4. Versión interactiva 
 g2 <- gl.pcoa.plot(
@@ -192,3 +191,123 @@ g2 <- gl.pcoa.plot(
   xaxis       = 1,
   yaxis       = 2
 )
+
+
+#-------------------------------------------------------------------------------
+#----------------------------------FILOGENIA------------------------------------
+library(dartR)
+library(adegenet)
+library(ape)
+
+# ============================================================
+# ÁRBOL NJ PARA NCEPGL
+# ============================================================
+
+library(dartR)
+library(ape)
+
+# ------------------------------------------------------------
+# 1. Comprobar dataset
+# ------------------------------------------------------------
+
+gl10_NCEPGL
+
+nInd(gl10_NCEPGL)
+nLoc(gl10_NCEPGL)
+
+
+# ------------------------------------------------------------
+# 2. Calcular distancia genética entre individuos
+# ------------------------------------------------------------
+
+dist_NCEPGL <- gl.dist.ind(
+  gl10_NCEPGL,
+  method = "euclidean",
+  verbose = 3
+)
+
+
+# ------------------------------------------------------------
+# 3. Construir árbol Neighbor-Joining
+# ------------------------------------------------------------
+
+tree_NCEPGL <- nj(dist_NCEPGL)
+
+
+# ------------------------------------------------------------
+# 4. Visualizar
+# ------------------------------------------------------------
+
+dev.new(
+  width = 14,
+  height = 12
+)
+
+plot(
+  tree_NCEPGL,
+  type = "phylogram",
+  cex = 0.5,
+  label.offset = 0.01,
+  main = "Neighbor-Joining - NCEPGL"
+)
+
+dev.new(width = 8, height = 22)
+
+plot(
+  tree_NCEPGL,
+  type = "phylogram",
+  direction = "rightwards",
+  cex = 0.4,
+  label.offset = 0.01,
+  no.margin = TRUE,
+  main = "Neighbor-Joining - NCEPGL"
+)
+
+
+
+
+
+
+
+dev.new(width = 10, height = 35)
+
+par(
+  mar = c(2, 2, 5, 8),
+  xpd = NA
+)
+
+plot(
+  tree_NCEPGL,
+  type = "phylogram",
+  direction = "rightwards",
+  cex = 0.40,
+  label.offset = 0.02,
+  main = "Neighbor-Joining tree - NCEPGL",
+  cex.main = 1.5,
+  font.main = 2
+)
+
+
+pdf(
+  "Arbol_NJ_NCEPGL_vertical.pdf",
+  width = 10,
+  height = 35
+)
+
+par(
+  mar = c(2, 2, 5, 8),
+  xpd = NA
+)
+
+plot(
+  tree_NCEPGL,
+  type = "phylogram",
+  direction = "rightwards",
+  cex = 0.40,
+  label.offset = 0.02,
+  main = "Neighbor-Joining tree - NCEPGL",
+  cex.main = 1.5,
+  font.main = 2
+)
+
+dev.off()
