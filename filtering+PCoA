@@ -1,131 +1,194 @@
-###MODIFICADO Y CHECKEADO 13-04-2026
-rm(list = ls())
+###MODIFICADO Y CHECKEADO 13-08-2026
 setwd("C:/Users/eamy1/Downloads/ST/data")
 
 library(dartR)
-library(adegenet)   # para DAPC más adelante si lo necesitas
+library(adegenet)   # para DAPC más adelante
 
-# Cargar solo genotipos
-gl_v3 <- gl.read.dart(filename = "Report_DStu19-4381_SNP_mapping_1.csv")
+# 1. Cargar archivo actual
+test <- read.table("cm_pop.txt", header = TRUE)
 
-# Metadatos en un objeto aparte
-#sep = "\t" se usa en funciones como read.table() para cargar archivos donde las columnas están separadas por tabulaciones.
-meta_temp <- read.table("iddata_fgg.txt", header = TRUE, sep = "\t")
+# 2. Nombres y población en columnas separadas
+colnames(test) <- c("id", "pop")
 
-# Primera columna sea 'id' y coincida con los genotipos
-#El orden de los IDs en el .txt debe ser el mismo que en el .csv
-colnames(meta_temp)[1] <- "id"
+# 3. Se guarda una versión limpia en formato CSV
+# dartR prefiere CSV para evitar líos de tabulaciones
+write.csv(test, "meta_limpio.csv", row.names = FALSE)
 
-# Asignación de metadatos manualmente al objeto genlight
-gl_v3@other$ind.metrics <- meta_temp
-
-# Lista los nombres de los objetos guardados en 'other'
-names(gl_v3@other)
-
-# Se asigna el nombre de la columna de población ('pop')
-pop(gl_v3) <- meta_temp$pop
-
-# Verificar si el objeto es válido
-print(gl_v3)
-
-# Genlight object
-nLoc(gl_v3)        #number of loci 74339
-nInd(gl_v3)        #number of individuals 187
-nPop(gl_v3)        #number of populations 9
-levels(pop(gl_v3)) #populations
-popNames(gl_v3)    #populations
-table(pop(gl_v3))
+# 4. Se cargan datos de DArT con este nuevo archivo
+gl <- gl.read.dart(filename = "Report_DStu19-4381_SNP_mapping_1.csv", 
+                   ind.metafile = "meta_limpio.csv")
+gl
 
 ## Filtros de calidad (dartR) ----------------------------------------------
 # 2) Filter by reproducibility (RepAvg)
-gl1 <- gl.filter.reproducibility(gl_v3, threshold = 1.00, verbose = 3) #siempre 0.99
-gl1 #55,454 SNPs
+gl1 <- gl.filter.reproducibility(gl, threshold = 1.00, verbose = 3) #siempre 0.99
+gl1
 
-# 3) Filtro por MAF > 0.01
-gl2 <- gl.filter.maf(gl1,
-                     threshold = 0.01,
-                     verbose   = 3)
+# Genlight object
+gl2 <- gl.filter.maf(gl1, threshold = 0.01, verbose = 3)
 
-gl2 #39,103 SNPs
-# --maf 0.05, indica: "Solo quédate con los SNPs donde el alelo raro aparezca en al menos el 5% del total de alelos de la población".
+gl2
 
-# ) Filter by locus
+# 3) Filter by locus
 gl3 <- gl.filter.callrate(gl2, method = "loc", threshold = 0.85, verbose=3) #remocion de loci con mas de 10% de datos faltantes
-gl3 # 13,900 loci
+gl3 
 
 # 4) Filter per individual
 gl4 <- gl.filter.callrate(gl3, method="ind", threshold = 0.90, recalc = TRUE, mono.rm = TRUE)  #remocion de individuos con mas de 15% de datos faltantes.
-gl4 #159 ind,  13,886 loci
+gl4 #158 ind, 11,836  loci
+
+# gl4 es el dataset filtrado según el paper
+nInd(gl4)  #158 individuos 
+nLoc(gl4)  #11,836  locis
 
 # 5) Filter by monomorphic loci
 gl5 <- gl.filter.monomorphs(gl4)
-gl5 #13,886 loci
+gl5 
 
 # 6) Eliminar SNPs secundarios (fragmentos con >1 SNP)
-gl6_3 <- gl.filter.secondaries(gl5)
-gl6_3 #12,941 SNPs, 159 ind
+gl6 <- gl.filter.secondaries(gl5)
+gl6
 
 #agregado 30-03-2026
-saveRDS(gl6_3, file = "gl6_v3_filtrado_call.rds")
+saveRDS(gl6, file = "gl6_v6_filtrado_call.rds")
 
-nLoc(gl6_3)        #number of loci 12941
-nInd(gl6_3)        #number of individuals 159
-nPop(gl6_3)        #number of populations 8
-levels(pop(gl6_3)) #populations 
-popNames(gl6_3)    #populations
-table(pop(gl6_3))
-#AR AT CR GA IP ME NZ PE
-#09 13 36 22 19 15 33 12
+#--------------------------------------------------------------------------
+# Ver las poblaciones y número de individuos
+table(pop(gl6))
 
-# Cargar el objeto ruta 30-03-2026
-gl6_3 <- readRDS("C:/Users/eamy1/Downloads/ST/data/gl6_v3_filtrado_call.rds")
+# ============================================================
+# gl7. SUBCONJUNTO: MORFOTIPO NEGRO - NCEPGL
+# ============================================================
 
-library(ggplot2)
-library(ggthemes)
-library(dplyr) 
+# Revisar las poblaciones
+table(pop(gl6))
 
-# --- PREPARACIÓN DE DATOS ----------------------------------------------
-gl6_imp <- gl.impute(gl6_3, method = "neighbour")
-pcoa_res <- gl.pcoa(gl6_imp, nfactors = 5)
+# Seleccionar individuos pertenecientes a NCEPGL
+ind_NCEPGL <- indNames(gl6)[pop(gl6) == "NCEPGL"]
 
-df_plot <- data.frame(pcoa_res$scores)
-df_plot$pop <- pop(gl6_3)
-var_exp <- pcoa_res$eig / sum(pcoa_res$eig) * 100
+# Crear nuevo objeto únicamente con NCEPGL
+gl6_NCEPGL <- gl.keep.ind(gl6, ind_NCEPGL)
 
-colores_pob <- c(
-  "AR" = "#3d84a8", "AT" = "#5F9EA0", "CR" = "#ab6393", "GA" = "#76EEC6",
-  "IP" = "#e6b8c1", "ME" = "#d96459", "NZ" = "#FAEBD7", "PE" = "#7c7a7e"
+# Verificar resultado
+gl6_NCEPGL
+
+# Número de individuos
+nInd(gl6_NCEPGL)
+
+# Número de loci
+nLoc(gl6_NCEPGL)
+
+# Verificar NCEPGL
+table(pop(gl6_NCEPGL))
+
+# Resumen del dataset NCEPGL
+gl6_NCEPGL
+
+#gl7 Filter by locus
+gl7_NCEPGL <- gl.filter.callrate(
+  gl6_NCEPGL,
+  method = "loc",
+  threshold = 0.85,
+  verbose = 3
 )
 
-limite_inferior <- -8
-limite_superior <- 10
+gl7_NCEPGL
 
-p <- ggplot(df_plot, aes(x = PC1, y = PC2, color = pop)) +
-  annotate("rect", xmin = -Inf, xmax = 0, ymin = -Inf, ymax = Inf,
-           fill = "grey95", alpha = 0.5) +
-  annotate("rect", xmin = -Inf, xmax = 0, ymin = 9, ymax = 10,
-           fill = "#84a9ac", alpha = 0.8) +
-  annotate("rect", xmin = 0, xmax = Inf, ymin = 9, ymax = 10,
-           fill = "#f9f1a5", alpha = 0.8) +
-  geom_point(size = 4, alpha = 0.8) +
-  scale_color_manual(values = colores_pob) +
-  scale_y_continuous(limits = c(limite_inferior, limite_superior), expand = c(0, 0)) +
-  labs(
-    x = paste0("PCoA axis 1 (", round(var_exp[1], 1), "%)"),
-    y = paste0("PCoA axis 2 (", round(var_exp[2], 1), "%)"),
-    color = "Población"
-  ) +
-  theme_bw() +
-  theme(
-    panel.grid = element_blank(),
-    legend.title = element_text(face = "bold"),
-    axis.title = element_text(size = 11),
-    plot.margin = margin(t = 25, r = 10, b = 10, l = 10)
-  ) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey70") +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey70") +
-  coord_cartesian(clip = "off")
+nInd(gl7_NCEPGL)
+nLoc(gl7_NCEPGL)
 
-print(p)
-ggsave("PCoA_estructura.png", plot = p, width = 12, height = 7, dpi = 300)
+#gl8 Filter per individual
+gl8_NCEPGL <- gl.filter.callrate(
+  gl7_NCEPGL,
+  method = "ind",
+  threshold = 0.90,
+  recalc = TRUE,
+  mono.rm = TRUE,
+  verbose = 3
+)
 
+gl8_NCEPGL
+
+nInd(gl8_NCEPGL)
+nLoc(gl8_NCEPGL)
+
+#gl9 MAF 
+gl9_NCEPGL <- gl.filter.maf(
+  gl8_NCEPGL,
+  threshold = 0.01,
+  verbose = 3
+)
+
+gl9_NCEPGL
+
+nInd(gl9_NCEPGL)
+nLoc(gl9_NCEPGL)
+
+gl10_NCEPGL <- gl.filter.monomorphs(gl9_NCEPGL)
+
+gl10_NCEPGL
+
+nInd(gl10_NCEPGL)
+nLoc(gl10_NCEPGL)
+
+saveRDS(
+  gl10_NCEPGL,
+  file = "gl10_NCEPGL_QC.rds"
+)
+
+gl10_NCEPGL
+
+nInd(gl10_NCEPGL)
+nLoc(gl10_NCEPGL)
+
+table(pop(gl10_NCEPGL))
+
+
+
+
+# ============================================================
+# NCEPGL: PCoA
+# ------------------------------------------------------------
+# 0. Cargar dataset NCEPGL
+# ============================================================
+
+gl6_NCEPGL <- readRDS("gl6_NCEPGL.rds")
+gl6_NCEPGL
+
+nInd(gl6_NCEPGL)
+nLoc(gl6_NCEPGL)
+
+table(pop(gl6_NCEPGL))
+
+## PCoA con filtrado de NCEPGL
+class(gl10_NCEPGL)
+gl10_NCEPGL
+gl10_NCEPGL_imp <- gl.impute(gl10_NCEPGL, method = "neighbour") #imputar NA
+gl10_NCEPGL_imp
+#PCoA (5 ejes a guardar)
+pcoa_gl10_NCEPGL <- gl.pcoa(gl10_NCEPGL, nfactors = 5)
+pcoa_gl10_NCEPGL   #varianza explicada
+
+#Gráfico
+library(ggplot2)
+g1 <- gl.pcoa.plot(
+  pcoa_gl10_NCEPGL,
+  gl10_NCEPGL_imp,
+  scale      = TRUE,
+  pop.labels = "pop",   # o el nombre del factor de población en @other$ind.metrics
+  xaxis      = 1,
+  yaxis      = 2,
+  ellipse    = TRUE
+)
+
+# Corregir proporciones de ejes
+g1 + coord_fixed(ratio = 1)
+
+# 4. Versión interactiva 
+g2 <- gl.pcoa.plot(
+  pcoa_gl10_NCEPGL,
+  gl10_NCEPGL_imp,
+  interactive = TRUE,
+  xaxis       = 1,
+  yaxis       = 2
+)
