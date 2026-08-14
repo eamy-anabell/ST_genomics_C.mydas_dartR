@@ -1,5 +1,6 @@
 ###MODIFICADO Y CHECKEADO 13-08-2026
 setwd("C:/Users/eamy1/Downloads/ST/data")
+rm(list=ls())
 
 library(dartR)
 library(adegenet)   # para DAPC más adelante
@@ -59,7 +60,24 @@ table(pop(gl6))
 # ============================================================
 # 7. SUBCONJUNTO: MORFOTIPO NEGRO - NCEPGL
 # ============================================================
-gl6_neutral
+# Seleccionar individuos pertenecientes a NCEPGL
+ind_NCEPGL <- indNames(gl6)[pop(gl6) == "NCEPGL"]
+
+# Crear nuevo objeto únicamente con NCEPGL
+gl6_NCEPGL <- gl.keep.ind(gl6, ind_NCEPGL)
+
+# Verificar resultado
+gl6_NCEPGL
+
+# Número de individuos
+nInd(gl6_NCEPGL)
+
+# Número de loci
+nLoc(gl6_NCEPGL)
+
+# Verificar NCEPGL
+table(pop(gl6_NCEPGL))
+gl6_NCEPGL
 # Revisar las poblaciones
 table(pop(gl6_neutral))
 
