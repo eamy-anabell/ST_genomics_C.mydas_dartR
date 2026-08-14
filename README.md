@@ -11,11 +11,8 @@ Para este estudio se muestrearon un total de nueve áreas de alimentación de *C
 
 Los archivos se filtraron posteriormente para producir puntuaciones DArT e informes de SNP utilizando la plataforma bioinformática DArTtoolbox. Según la secuencia de aparición los loci se identificación como SNP o alelos de referencia según la frecuencia de aparición. Se realizó un filtrado adicional utilizando el paquete DartR implementado en el software RStudio. El filtrado utilizó los siguientes criterios: reproducibilidad (umbral = 1,00), frecuencias alélicas menores (MAF) >0,01, tasa de llamada individual con umbral >0,90, tasa de llamada de locus con umbral >0,85, y descarte de marcadores monomórficos. Los fragmentos que contenían más de un SNP fueron filtrados utilizando el comando gl.filter.secondaries.
 
-Dado que las áreas de alimentación de *C. mydas* albergan individuos con múltiples orígenes se utilizó un enfoque basado en individuos (sin información previa) con todos los individuos y loci, para detectar como se agrupaban las muestras (PCoA, DAPC y STRUCTURE). Se definen los grupos genéticos. De los cuales trabajará con uno, realizando fitros de calidad y PCoA preliinar para ver si este agrupamiento.
+Dado que las áreas de alimentación de *C. mydas* albergan individuos con múltiples orígenes se utilizó un enfoque basado en individuos (sin información previa) con todos los individuos y loci, para detectar como se agrupaban las muestras (PCoA, DAPC y STRUCTURE). Se definen los grupos genéticos. De los cuales trabajará con uno, realizando fitros de calidad y PCoA preliminar para ver si este agrupamiento.
 
-Las zonas de forrajeo fueron considerado como sitios de estudio, no como grupos genético, dado que estas están compuestas por poblaciones mixtas. Los grupos genéticos son considerados como poblaciones para los análisis que se realizarán. 
-Luego de eliminar los outliers, se eliminan de conjunto de datos neutro restante todos los loci que muestran desviaciones significativas del equilibrio de Hardy Weinberg (HWE), mientras que los loci que muestras n desequilibrio de ligamiento (LD) significativo también se eliminan utilizando PLINK V1.9.
-Finalmente, para cada grupo detectado por los análisis de PCoA, DAAPC y STRUCTURE, se calcula la heterocigosidad esperada (He) y la heterocigosidad observada (Ho
 
 # Datos
 Los archivos de datos originales (`Report_DStu19-4381_SNP_mapping_1.csv`, `iddata_fgg.txt` y otros relacionados) 
