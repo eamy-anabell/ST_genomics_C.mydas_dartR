@@ -20,8 +20,24 @@ gl <- gl.read.dart(filename = "Report_DStu19-4381_SNP_mapping_1.csv",
                    ind.metafile = "meta_limpio.csv")
 gl
 
+
+###
+# Cargar datos como lo tenías originalmente
+gl <- gl.read.dart(filename = "Report_DStu19-4381_SNP_mapping_1.csv", 
+                   ind.metafile = "meta_limpio.csv")
+
+# Leer el CSV con 'local'
+meta_local <- read.csv("local.csv", header = TRUE)
+
+# Asignar la columna a los métricos de los individuos
+gl@other$ind.metrics$local <- meta_local$local[match(indNames(gl), meta_local$id)]
+
+# Si deseas definir 'local' como la población principal de trabajo:
+pop(gl) <- gl@other$ind.metrics$local
+
 ## Filtros de calidad (dartR) ----------------------------------------------
 # 2) Filter by reproducibility (RepAvg)
+gl
 gl1 <- gl.filter.reproducibility(gl, threshold = 1.00, verbose = 3) #siempre 0.99
 gl1
 
@@ -102,6 +118,44 @@ table(pop(gl6_NCEPGL))
 # Resumen del dataset NCEPGL
 gl6_NCEPGL
 
+
+#-----------------------------------------------------------------------
+
+# 1. Revisar nombres de las columnas del CSV
+colnames(meta_local)
+
+# 2. Comparar los primeros nombres de ambos lados
+head(indNames(gl6_NCEPGL))
+head(meta_local)
+# 1. Cargar el CSV especificando el separador correcto (punto y coma)
+meta_local <- read.csv("local.csv", header = TRUE, sep = ";")
+
+# 2. Confirmar que las columnas se separaron (deben aparecer: id, local, gl)
+head(meta_local)
+
+# 3. Asignar la columna 'local' haciendo el match por ID
+gl6_NCEPGL@other$ind.metrics$local <- meta_local$local[match(indNames(gl6_NCEPGL), meta_local$id)]
+
+# 4. Establecer 'local' como la población principal de trabajo
+pop(gl6_NCEPGL) <- gl6_NCEPGL@other$ind.metrics$local
+
+# 5. Comprobar la tabla de frecuencias
+table(pop(gl6_NCEPGL), useNA = "always")
+
+#Resumen 
+gl6_NCEPGL
+
+# Número de individuos
+nInd(gl6_NCEPGL)
+
+# Número de loci
+nLoc(gl6_NCEPGL)
+
+# Verificar NCEPGL
+table(pop(gl6_NCEPGL))
+
+
+#-------------------------------------------------------------------------
 #gl7 Filter by locus
 gl7_NCEPGL <- gl.filter.callrate(
   gl6_NCEPGL,
@@ -137,27 +191,25 @@ gl9_NCEPGL <- gl.filter.maf(
   verbose = 3
 )
 
-gl9_NCEPGL #8847
+gl9_NCEPGL #8835
 
 nInd(gl9_NCEPGL)
 nLoc(gl9_NCEPGL)
 
+#Filter Monorficos
 gl10_NCEPGL <- gl.filter.monomorphs(gl9_NCEPGL)
 
 gl10_NCEPGL 
 
 nInd(gl10_NCEPGL) #96
-nLoc(gl10_NCEPGL) #8847
+nLoc(gl10_NCEPGL) #8835
+table(pop(gl10_NCEPGL))
 
 saveRDS(
   gl10_NCEPGL,
   file = "gl10_neu_NCEPGL_QC.rds"
 )
 
-gl10_NCEPGL
-
-nInd(gl10_NCEPGL)
-nLoc(gl10_NCEPGL)
 
 # ============================================================
 # NCEPGL: COMPARACIÓN MAF 0.001 vs 0.05
@@ -170,17 +222,7 @@ library(adegenet)
 # ------------------------------------------------------------
 # 0. Cargar dataset NCEPGL
 # ------------------------------------------------------------
-
-gl6_NCEPGL <- readRDS("gl6_neu_NCEPGL.rds")
-
-gl6_NCEPGL
-
-nInd(gl6_NCEPGL)
-nLoc(gl6_NCEPGL)
-
-table(pop(gl6_NCEPGL))
-
-## PCoA con gl6_s (filtrado básico)
+# PCoA con gl6_s (filtrado básico)
 class(gl10_NCEPGL)
 gl10_NCEPGL
 gl10_NCEPGL_imp <- gl.impute(gl10_NCEPGL, method = "neighbour") #Solo si es que se quiere imputar NA
@@ -199,7 +241,7 @@ g1 <- gl.pcoa.plot(
   xaxis      = 1,
   yaxis      = 2,
   ellipse    = TRUE
-)
+) 
 
 # 4. Versión interactiva 
 g2 <- gl.pcoa.plot(
@@ -211,11 +253,6 @@ g2 <- gl.pcoa.plot(
 )
 
 
-#-------------------------------------------------------------------------------
-#----------------------------------FILOGENIA------------------------------------
-library(dartR)
-library(adegenet)
-library(ape)
 
 # ============================================================
 # ÁRBOL NJ PARA NCEPGL
@@ -269,5 +306,30 @@ plot(
   main = "Neighbor-Joining - NCEPGL"
 )
 
-dev.new(width = 8, height = 22)
-dev.off()
+#----------------------------------------------------------------------
+
+library(adegenet)
+
+# 1. Encontrar el número de grupos (K)
+# Te pedirá elegir el K. Elige el que tenga el valor de BIC más bajo en el gráfico.
+clusters <- find.clusters(gl10_NCEPGL, max.n.clust = 10, n.pca = 100, choose.n.clust = TRUE)
+
+# 2. Ejecutar el DAPC
+# Selecciona suficientes PCs para retener el 80-90% de la varianza (ej. 50-80)
+dapc1 <- dapc(gl10_NCEPGL, clusters$grp, n.pca = 60, n.da = 2)
+
+# 3. Ver el gráfico de asignación (Compoplot)
+# Esto te dirá si hay individuos "mezclados" (híbridos) entre linajes
+compoplot(dapc1, col=funky(5), main="Asignación Genética por Individuo")
+
+#-------------------------------Clustering analyses-----------------------------
+#-------------------------------------------------------------------------------
+#Se utilizó STRUCTURE (Pritchard et al. 2000) para detectar Unidades Significativas
+#Evolutivas (ESUs) y patrones de mezcla. Los valores de K oscilaron entre 1 y 15,
+#con #10 réplicas por K, y cada ejecución para 500,000 iteraciones MCMC (burn-in: 50,000).
+#Los resultados se resumieron usando STRUCTURE Harvester (Earl y von Holdt 2012) 
+#y CLUMPP (Jakobsson y Rosenberg 2007). Para la identificación del número más
+#probable de los clústeres genéticos (K) dentro de los datos analizados, se 
+#utilizó el método de DeltaK de Evanno (Evanno et al. 2005).
+#Los mapas se visualizaron en QGIS 3.28 (QGIS 2024). La PCoA se realizó en dartR.
+
