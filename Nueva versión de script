@@ -311,7 +311,7 @@ write.table(
 
 cat("Outliers detectados por PCAdapt:", length(out_pcadapt_names), "\n")
 
-
+#Outliers detectados por Fsthet: 1216 
 
 # ==============================================================================
 # METODO 2: FSTHET (Relationship Fst - Heterozygosity) - CORREGIDO
@@ -332,3 +332,181 @@ colnames(fsts_res)
 
 # 3. Inspeccionar las primeras filas para verificar los nombres
 head(fsts_res)
+
+#==========================OBTENER OUTLIERS=============================
+library(dplyr)
+
+# Identificar automáticamente la columna de outliers o hacer el filtro directo
+if ("outlier" %in% colnames(fsts_res)) {
+  out_fsthet_df <- fsts_res %>% filter(outlier == TRUE)
+} else if ("Outlier" %in% colnames(fsts_res)) {
+  out_fsthet_df <- fsts_res %>% filter(Outlier == TRUE)
+} else if ("outliers" %in% colnames(fsts_res)) {
+  out_fsthet_df <- fsts_res %>% filter(outliers == TRUE)
+} else {
+  # Si devuelve CI (intervalos de confianza) directamente
+  out_fsthet_df <- fsts_res %>% filter(Fst < CI.low | Fst > CI.high)
+}
+
+# Obtener nombres de los marcadores
+out_fsthet_names <- as.character(out_fsthet_df$Locus)
+
+# Guardar la lista de outliers de Fsthet
+write.table(
+  out_fsthet_names,
+  file = "./Resultados_Outliers/gl6_fsthet_outliers.txt",
+  row.names = FALSE, col.names = FALSE, quote = FALSE
+)
+
+cat("Outliers detectados por Fsthet:", length(out_fsthet_names), "\n")
+
+#Outliers detectados por PCAdapt: 5412 
+
+
+
+#==============================================================================
+
+# --- 2. HWE --- elimina locis que pueden afectar al FST y no se ajustan al HWE
+
+
+gl_hwe <- gl.filter.hwe(gl_preNeut, subset = "each", alpha_val = 0.05, 
+                        multi_comp = TRUE, multi_comp_method = "fdr")
+nLoc(gl_hwe) # 
+
+
+# --- 3. Filter by Linkage desequilibrium (LD) using plink ---
+
+# Create folder "plink_LD"
+dir.create("plink_LD")
+
+"C:\Users\eamy1\OneDrive\Escritorio\plink_win64\plink.exe"
+# export to plink format
+gl2plink(gl_hwe, plink_path = "C:/Users/Lab/Downloads/plink_win64_20230116",
+         bed_file = TRUE,
+         outfile = "gl_plink",
+         outpath = "./plink_LD/")
+
+
+
+# --- Execute plink to remove linked loci ---
+
+# ARCHIVOS .BED .FAM y .BIM DEBEN ESTAR EN LA CARPETA DONDE ESTA EL EJECUTABLE
+# DE PLINK
+#   Open your terminal.
+#   Navigate to your project folder where the executable and files are.
+#   Run the following command:
+
+#    .\plink.exe --bfile .\gl_plink --indep-pairwise 50 10 0.5 --out LD_results
+
+# What this does: Calculates LD in windows of 50 SNPs, shifting by 10 SNPs, 
+# and flags loci for removal if r2 is greater than 0.5 (50%).
+
+
+## LD_results.prune.out (file with pruned loci after ld filter of Plink).
+
+# 4. Drop Linked Loci 
+"C:\Users\eamy1\Downloads\Taller_SNPs_2026\Taller_SNPs_2026\LD_results.prune.out"
+linked_loci <- read.table("C:/Users/eamy1/Downloads/Taller_SNPs_2026/Taller_SNPs_2026/LD_results.prune.out", header = FALSE) 
+linked_loci <- as.vector(linked_loci[["V1"]])
+head(linked_loci)
+
+gl_Neut <- gl.drop.loc(gl_hwe, loc.list =  linked_loci, verbose = 3) # remover 8
+gl_Neut # 
+
+
+# Save the final neutral Genlight object as RDS
+saveRDS(gl_Neut, file="gl_Neut.rds")
+
+
+#script 4
+# Basic Analyses
+
+detach("package:dartR", unload = TRUE)
+library(dartRverse)
+
+
+# Set the working directory ----------------------------------------------
+
+setwd("C:/Users/name/Desktop/Taller_snps_2026")
+
+
+# Neutral Dataset ---------------------------------------------------------
+
+gl_Neut <- readRDS("gl_Neut.rds")
+gl_Neut #
+
+
+# Diversity ---------------------------------------------------------------
+
+# 1) Heterozygosity
+report_het <- gl.report.heterozygosity(gl_Neut,v=3)
+View(report_het)
+
+
+# 2) Allelic Richness 
+rep_AR <- gl.report.allelerich(gl_Neut)
+
+# Extract the values
+AR_mean <- rep_AR$`Allelic Richness per population`
+AR_mean
+
+
+# FST ---------------------------------------------------------------------
+
+fst <- gl.fst.pop(gl_Neut, nboots = 1000, percent = 95)
+fst$Fsts
+fst$Pvalues
+
+
+# PCoA --------------------------------------------------------------------
+
+
+# Impute missing data
+gl_Neut_imp <- gl.impute(gl_Neut, method = "neighbour")
+
+# PCoA
+pcoa1 <- gl.pcoa(gl_Neut_imp, nfactors = 5)
+
+# Standard 2D Plot
+gl.pcoa.plot(pcoa1, gl_Neut_imp, scale = TRUE, pop.labels = "pop", xaxis = 1, yaxis = 2, ellipse = TRUE)
+# Interactive 2D Plot
+gl.pcoa.plot(pcoa1, gl_Neut_imp, scale = TRUE, interactive = TRUE, xaxis = 1, yaxis = 2, ellipse = TRUE)
+# 3D Plot (Axes 1, 2, and 3)
+gl.pcoa.plot(pcoa1, gl_Neut_imp, scale = TRUE, pop.labels = "pop", xaxis = 1, yaxis = 2, zaxis = 3, ellipse = TRUE)
+
+
+
+# Export another formats --------------------------------------------------
+
+#    functions "gl2..."
+
+# Export as genepop format
+gl2genepop(gl_Neut, outfile = "gl_Neut.gen", outpath = "./", verbose = 3)
+
+# Export as structure format
+gl2structure(gl_Neut, outfile = "gl_Neut.str", outpath = getwd(), verbose = 3)
+
+
+
+# Execute another programs from R -----------------------------------------
+
+# NeEstimator
+# 
+# nes <- gl.LDNe(gl_Neut, outfile="popsLD.txt", outpath=tempdir(),
+#                neest.path = "./path_to Ne-21",
+#                critical=c(0, 0.05), singleton.rm=TRUE, mating='random')
+# nes
+
+
+
+
+# Add information to genlight object --------------------------------------
+
+# Example
+# Adding longitude and latitude information to a genlight object
+
+gl_Neut2 <- gl.add.indmetrics(gl_Neut, ind.metafile = "my_lonlat.csv")
+gl_Neut2$other$ind.metrics$lon
+gl_Neut2$other$ind.metrics$lat
+
+gl.map.interactive(gl_Neut2)
