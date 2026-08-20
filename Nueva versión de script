@@ -1,0 +1,334 @@
+setwd("C:/Users/eamy1/Downloads/ST/data")
+
+library(dartR)
+library(adegenet)
+
+# 1. Cargamos tu archivo de metadatos
+test <- read.table("cm_pop.txt", header = TRUE)
+
+# 2. Asignamos nombres de columnas correctos
+colnames(test) <- c("id", "pop")
+
+# 3. Guardamos la versión limpia en CSV
+write.csv(test, "meta_limpio.csv", row.names = FALSE)
+
+# 4. Cargar datos de DArT
+gl <- gl.read.dart(filename = "Report_DStu19-4381_SNP_mapping_1.csv", 
+                   ind.metafile = "meta_limpio.csv")
+gl
+
+# -----------------------------------------------------------------
+# SELECCIONAR LA POBLACIÓN NCEPGL
+# -----------------------------------------------------------------
+
+# OPCIÓN A: Usando la función nativa de dartR (RECOMENDADO)
+# Esta función mantiene solo la población que le indiques
+gl_NCEPGL <- gl.keep.pop(gl, pop.list = "NCEPGL")
+
+# OPCIÓN B: Tu método (Corregido usando el objeto 'gl' cargado)
+# ind_NCEPGL <- indNames(gl)[pop(gl) == "NCEPGL"]
+# gl_NCEPGL <- gl.keep.ind(gl, ind.list = ind_NCEPGL)
+
+# -----------------------------------------------------------------
+# VERIFICACIÓN DEL NUEVO OBJETO
+# -----------------------------------------------------------------
+
+# Ver resumen del nuevo objeto filtrado
+gl_NCEPGL
+
+# Verificar las poblaciones presentes (debería mostrar solo NCEPGL)
+popNames(gl_NCEPGL) #NCEPGL
+
+# Número de individuos en la nueva población
+nInd(gl_NCEPGL) #104
+
+# Número de loci (SNPs)
+nLoc(gl_NCEPGL) #74339
+
+
+## Filtros de calidad (dartR) ----------------------------------------------
+# 2) Filter by reproducibility (RepAvg)
+gl1 <- gl.filter.reproducibility(gl_NCEPGL, threshold = 1.00, verbose = 3) #siempre 0.99
+gl1 #55,454 SNPs #55,454 SNPs
+
+# Genlight object
+gl2 <- gl.filter.maf(gl1, verbose   = 3)
+
+gl2 #39,192 SNPs #30,810 SNPs
+
+# Si pones --maf 0.05, le estás diciendo a VCFtools: "Solo quédate con los SNPs
+#donde el alelo raro aparezca en al menos el 5% del total de alelos de la población".
+#En nuestro caso, con 95 individuos (que son 190 alelos, porque cada individuo es 
+#diploide), un MAF de 0.05 significa que el SNP debe aparecer al menos en 9 o 10 
+#alelos (aprox. 5 individuos heterocigotos).
+# --maf 0.05, indica: "Solo quédate con los SNPs donde el alelo raro aparezca en al menos el 5% del total de alelos de la población".
+
+# ) Filter by locus
+gl3 <- gl.filter.callrate(gl2, method = "loc", threshold = 0.85, verbose=3) #remocion de loci con mas de 10% de datos faltantes
+gl3 # 11,848 SNPs loci #19,606
+
+
+# 4) Filter per individual
+gl4 <- gl.filter.callrate(gl3, method="ind", threshold = 0.90, recalc = TRUE, mono.rm = TRUE)  #remocion de individuos con mas de 15% de datos faltantes.
+gl4 #158 ind, 11,836  loci
+
+# gl4 es el dataset filtrado según el paper
+nInd(gl4)  #92 individuos 
+nLoc(gl4)  #19486  locis
+
+
+# 5) Filter by monomorphic loci
+gl5 <- gl.filter.monomorphs(gl4)
+gl5 #11,836 loci #19,486
+
+
+# 6) Eliminar SNPs secundarios (fragmentos con >1 SNP)
+gl6 <- gl.filter.secondaries(gl5)
+gl6 #11,138  SNPs, 158 ind
+
+#agregado 30-03-2026
+saveRDS(gl6, file = "gl6_v6_filtrado_call.rds")
+
+nLoc(gl6)        #number of loci 17,554 
+nInd(gl6)        #number of individuals 92
+
+nPop(gl6)        #number of populations 8
+levels(pop(gl6)) #populations 
+popNames(gl6)    #populations
+table(pop(gl6))
+#--------------------------------------------------------------------------
+
+# 1. Cargar el CSV con metadatos de localidades
+meta_local <- read.csv("local.csv", header = TRUE, sep = ";")
+
+# 2. REVISIÓN PREVIA DEL CSV Y COINCIDENCIA
+# Verificar las columnas del CSV cargado
+colnames(meta_local)
+
+# Ver los primeros registros del CSV
+head(meta_local)
+
+# Comparar los primeros IDs del objeto genómico vs. los IDs del CSV
+head(indNames(gl6))
+head(meta_local$id)
+
+# Verificar cuántos IDs del objeto genómico coinciden perfectamente en el CSV
+sum(indNames(gl6) %in% meta_local$id)
+
+# -----------------------------------------------------------------
+# 3. ASIGNACIÓN DE METADATOS Y CAMBIO DE POBLACIÓN
+# -----------------------------------------------------------------
+
+# Asignar la columna 'local' haciendo el match por ID
+gl6@other$ind.metrics$local <- meta_local$local[match(indNames(gl6), meta_local$id)]
+
+# Establecer 'local' como la población principal en el objeto genlight
+pop(gl6) <- gl6@other$ind.metrics$local
+
+# -----------------------------------------------------------------
+# 4. COMPROBACIÓN Y RESUMEN DE LOCALIDADES
+# -----------------------------------------------------------------
+
+# Tabla de frecuencias de los individuos por localidad (incluye si hay NA)
+table(pop(gl6), useNA = "always") #"AR" "AT" "CR" "GA" "IP" "ME" "NZ" "PE" "NA"
+
+# Nombres de las localidades/poblaciones únicas asignadas
+popNames(gl6) #"AR" "AT" "CR" "GA" "IP" "ME" "NZ" "PE"
+
+# Resumen general del objeto dartR
+gl6
+
+# Número total de individuos
+nInd(gl6) #92
+
+# Número de loci
+nLoc(gl6) #17554
+
+# Preliminary PCoA ----------------------------------------------------------
+
+#gl6 <- readRDS("gl6.rds") #call RDS
+table(pop(gl6))
+
+# Impute the remaining missing values
+# PCoA requires complete datasets. The 'neighbour' method imputes missing 
+# data based on the most similar individual.
+gl_imp <- gl.impute(gl6, method = "neighbour")
+
+# PCoA
+pcoa <- gl.pcoa(gl_imp, nfactors = 5)
+
+# Static PCoA Plot
+gl.pcoa.plot(pcoa, gl6, ellipse = TRUE)
+
+# Interactive PCoA Plot
+gl.pcoa.plot(pcoa, gl6, interactive = TRUE, ellipse = TRUE)
+
+# Versión interactiva SIN ELIPSE
+g2 <- gl.pcoa.plot(pcoa,gl6,
+  interactive = TRUE,
+  xaxis       = 1,
+  yaxis       = 2
+)
+
+#------------------------------------------------------------------------------
+# Configurar la ruta ejecutable de PLINK en la sesión de R
+plink_path <- "C:/Users/eamy1/OneDrive/Escritorio/plink_win64/plink.exe"
+
+# Verificar que el ejecutable existe en la ruta
+file.exists(plink_path) # Debe retornar TRUE
+
+# -----------------------------------------------------------------
+# 1. CARGA DE LIBRERÍAS Y DATOS
+# -----------------------------------------------------------------
+library(dartR)
+library(dplyr)
+gl6
+# Configurar ruta de PLINK
+Sys.setenv(PLINK_PATH = "C:/Users/eamy1/OneDrive/Escritorio/plink_win64/plink.exe")
+
+# -----------------------------------------------------------------
+# 2. DETECCIÓN DE OUTLIERS CON OUTFLANK
+# -----------------------------------------------------------------
+# Nota: La población (pop) debe estar correctamente asignada en gl8
+# para que OutFLANK calcule la Fst relativa por locus.
+
+res_outflank <- gl.outflank(gl6, plot = TRUE)
+
+# Inspeccionar la tabla de resultados en RStudio
+View(res_outflank$outflank$results)
+
+# -----------------------------------------------------------------
+# 3. EXPORTAR RESULTADOS A DISCO
+# -----------------------------------------------------------------
+# Crear el directorio 'outflank' si no existe
+if (!dir.exists("outflank")) {
+  dir.create("outflank")
+}
+
+# Guardar los resultados detallados en archivo de texto plano
+write.table(
+  res_outflank$outflank$results, 
+  file = "./outflank/outflank_results.txt", 
+  row.names = FALSE, 
+  sep = "\t"
+)
+
+# -----------------------------------------------------------------
+# 4. EXTRACCIÓN DE LOCI OUTLIERS
+# -----------------------------------------------------------------
+# Filtrar los SNPs marcados como Outliers por OutFLANK
+outliers <- res_outflank$outflank$results %>% 
+  filter(OutlierFlag == TRUE) %>% 
+  select(LocusName)
+
+total_out <- as.character(outliers$LocusName)
+
+# Mostrar la cantidad y lista de loci detectados
+cat("Número de loci candidatos a outliers:", length(total_out), "\n")
+head(total_out)
+
+# -----------------------------------------------------------------
+# 5. GENERACIÓN DEL DATASET NEUTRO (DROPPING OUTLIERS)
+# -----------------------------------------------------------------
+# Si se detectaron outliers, removerlos para crear el dataset neutro
+if (length(total_out) > 0) {
+  gl_preNeut <- gl.drop.loc(gl6, loc.list = total_out, verbose = 3)
+  
+  cat("Loci iniciales (gl6):", nLoc(gl6), "\n")
+  cat("Loci neutros finales (gl_preNeut):", nLoc(gl_preNeut), "\n")
+  
+  # Guardar el objeto neutro resultante para análisis posteriores
+  saveRDS(gl_preNeut, "gl_preNeut.rds")
+} else {
+  message("No se identificaron loci outliers bajo los umbrales de OutFLANK.")
+  gl_preNeut <- gl6
+}
+
+
+
+
+#------------------------------------------------------------------------------
+library(dartR)
+
+# Cargar tus datos
+gl8 <- readRDS("gl8.rds")
+
+# Exportar al formato que exige BayeScan
+gl2bayescan(gl6, outfile = "datos_bayescan.gest", outpath = "C:/Users/eamy1/Downloads/ST/data")
+
+
+
+
+#===============================================================================
+
+# ==============================================================================
+# PIPELINE DE OUTLIERS CON PCADAPT Y FSTHET PARA EL OBJETO 'gl6'
+# ==============================================================================
+
+library(dartR)
+library(pcadapt)
+library(fsthet)
+library(qvalue)
+library(dplyr)
+
+# 1. Cargar el objeto gl6
+gl6 <- readRDS("gl6_filtrado_call.rds")
+
+# Crear carpeta para guardar resultados
+if (!dir.exists("Resultados_Outliers")) {
+  dir.create("Resultados_Outliers")
+}
+
+# ==============================================================================
+# METODO 1: PCADAPT (Fast Principal Component Analysis)
+# Metodología: MAF = 0.01 y q-value < 0.05
+# ==============================================================================
+
+# A. Convertir la matriz de genotipos (0,1,2) directamente a pcadapt
+gl_mat <- as.matrix(gl6)
+gl6_pcadapt <- read.pcadapt(t(gl_mat), type = "pcadapt")
+
+# B. Evaluar componentes principales (Screeplot para confirmar K)
+x_eval <- pcadapt(gl6_pcadapt, K = 10, min.maf = 0.01)
+plot(x_eval, option = "screeplot")
+
+# C. Ejecutar PCAdapt con K elegido (ejemplo K = 4) y MAF = 0.01
+x <- pcadapt(gl6_pcadapt, K = 4, min.maf = 0.01)
+
+# D. Transformar p-values a q-values y seleccionar outliers
+qval <- qvalue(x$pvalues)$qvalues
+out_pcadapt_idx <- which(qval < 0.05)
+
+# E. Nombres de los SNPs outliers de PCAdapt
+out_pcadapt_names <- locNames(gl6)[out_pcadapt_idx]
+
+# F. Guardar lista de outliers de PCAdapt
+write.table(
+  out_pcadapt_names,
+  file = "./Resultados_Outliers/gl6_pcadapt_outliers.txt",
+  row.names = FALSE, col.names = FALSE, quote = FALSE
+)
+
+cat("Outliers detectados por PCAdapt:", length(out_pcadapt_names), "\n")
+
+
+
+# ==============================================================================
+# METODO 2: FSTHET (Relationship Fst - Heterozygosity) - CORREGIDO
+# ==============================================================================
+
+# A. Preparar la estructura de datos compatible
+gi6 <- gl2gi(gl6, verbose = 0)
+df_fsthet <- genind2df(gi6, sep = "/")
+
+# fsthet requiere la columna 'pop' al inicio y sin la columna id
+df_fsthet <- cbind(pop = pop(gl6), df_fsthet)
+
+# 1. Ejecutar fsthet
+fsts_res <- fsthet(df_fsthet, alpha = 0.05)
+
+# 2. Ver las columnas exactas que generó la función
+colnames(fsts_res)
+
+# 3. Inspeccionar las primeras filas para verificar los nombres
+head(fsts_res)
