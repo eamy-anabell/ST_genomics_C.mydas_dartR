@@ -1,4 +1,5 @@
 setwd("C:/Users/eamy1/Downloads/ST/data")
+rm(list = ls())
 
 library(dartR)
 library(adegenet)
@@ -123,6 +124,7 @@ sum(indNames(gl6) %in% meta_local$id)
 gl6@other$ind.metrics$local <- meta_local$local[match(indNames(gl6), meta_local$id)]
 
 # Establecer 'local' como la población principal en el objeto genlight
+
 pop(gl6) <- gl6@other$ind.metrics$local
 
 # -----------------------------------------------------------------
@@ -251,12 +253,64 @@ if (length(total_out) > 0) {
 library(dartR)
 
 # Cargar tus datos
-gl8 <- readRDS("gl8.rds")
+gl6 <- readRDS("gl6.rds")
 
 # Exportar al formato que exige BayeScan
 gl2bayescan(gl6, outfile = "datos_bayescan.gest", outpath = "C:/Users/eamy1/Downloads/ST/data")
 
 
+#resultados
+# ==============================================================================
+# PROCESAMIENTO DE RESULTADOS DE BAYESCAN
+# Archivo de entrada: C:\Users\eamy1\Downloads\ST\Bayes2\output_fst.txt
+# Metodología: FDR (q-value) < 0.05
+# ==============================================================================
+
+library(dplyr)
+library(dartR)
+
+# 1. Cargar el archivo de salida de BayeScan
+ruta_bayescan <- "C:/Users/eamy1/Downloads/ST/Bayes2/output_fst.txt"
+bs_res <- read.table(ruta_bayescan, header = TRUE)
+
+# 2. Asignar los nombres reales de los SNP de gl6
+# BayeScan numera los loci (columna 1) secuencialmente en el mismo orden que gl6
+bs_res$LocusName <- locNames(gl6)
+
+# 3. Filtrar outliers según la metodología (qval < 0.05)
+bs_outliers_df <- bs_res %>% 
+  filter(qval < 0.05)
+
+bs_outliers_names <- bs_outliers_df$LocusName
+
+cat("Outliers detectados por BayeScan (qval < 0.05):", length(bs_outliers_names), "\n")
+
+# 4. Guardar la lista de nombres en la carpeta de resultados
+if (!dir.exists("./Resultados_Outliers")) {
+  dir.create("./Resultados_Outliers")
+}
+
+write.table(
+  bs_outliers_names,
+  file = "./Resultados_Outliers/gl6_bayescan_outliers.txt",
+  row.names = FALSE, col.names = FALSE, quote = FALSE
+)
+
+# 5. Graficar la relación entre Fst y -log10(q-value)
+bs_res$log10_qval <- -log10(bs_res$qval)
+
+plot(bs_res$fst, bs_res$log10_qval,
+     xlab = "FST", ylab = "-log10(q-value)",
+     main = "BayeScan: Candidate Outliers (FDR = 0.05)",
+     pch = 20, col = "grey")
+
+# Línea del umbral q = 0.05
+abline(h = -log10(0.05), col = "red", lty = 2, lwd = 2)
+
+# Resaltar en rojo los outliers detectados
+points(bs_res$fst[bs_res$qval < 0.05], 
+       bs_res$log10_qval[bs_res$qval < 0.05], 
+       col = "red", pch = 19)
 
 
 #===============================================================================
@@ -361,80 +415,124 @@ write.table(
 cat("Outliers detectados por Fsthet:", length(out_fsthet_names), "\n")
 
 #Outliers detectados por PCAdapt: 5412 
+  
+  # ==============================================================================
+# CONSOLIDACIÓN Y CLASIFICACIÓN CONSERVADORA DE LOCI OUTLIERS/NEUTROS
+# Metodología: 
+#   (i)   Outliers: detectados por AL MENOS 2 programas.
+#   (ii)  Neutros: NO detectados por ningún programa (asumidos neutros).
+#   (iii) Zona Gris: detectados por SOLO 1 programa (descartados).
+# ==============================================================================
+
+library(dartR)
+library(dplyr)
+
+# 1. Cargar las 3 listas de outliers guardadas previamente
+bs_out     <- scan("./Resultados_Outliers/gl6_bayescan_outliers.txt", what = "character")
+pcadapt_out <- scan("./Resultados_Outliers/gl6_pcadapt_outliers.txt", what = "character")
+fsthet_out  <- scan("./Resultados_Outliers/gl6_fsthet_outliers.txt", what = "character")
+
+# 2. Vector con todos los loci observados como outliers y conteo por frecuencia
+todos_outliers <- c(bs_out, pcadapt_out, fsthet_out)
+tabla_conteo   <- table(todos_outliers)
+
+#  Filters for neutral dataset ---------------------------------------------
+# --- 1. Remove outliers ---
+
+# (i) Outliers Candidatos: Presentes en >= 2 métodos
+loci_outliers_final <- names(tabla_conteo[tabla_conteo >= 2])
+
+# (iii) Zona Gris: Presentes en exactamente 1 método (se descartan de ambos conjuntos)
+loci_zona_gris <- names(tabla_conteo[tabla_conteo == 1])
+
+# (ii) Loci Neutros: Todos los loci de gl6 que NUNCA fueron detectados por ningún método
+todos_los_loci <- locNames(gl6)
+loci_neutros_final <- setdiff(todos_los_loci, c(loci_outliers_final, loci_zona_gris))
 
 
+# 3. Filtrar el objeto genlight en R usando gl.keep.loc()
+gl6_OUTLIERS <- gl.keep.loc(gl6, loc.list = loci_outliers_final, verbose = 0)
+gl_preNeut   <- gl.keep.loc(gl6, loc.list = loci_neutros_final, verbose = 0)
 
-#==============================================================================
+# Guardar los datasets resultantes
+saveRDS(gl6_OUTLIERS, "gl6_OUTLIERS_conservador.rds")
+saveRDS(gl_preNeut, "gl_preNeut_conservador.rds")
+
+
+# --- RESUMEN EN CONSOLA ---
+cat("\n======================================================\n")
+cat("RESUMEN DE CLASIFICACIÓN CONSERVADORA:\n")
+cat("======================================================\n")
+
+cat("Total de SNPs iniciales (gl6):      ", nLoc(gl6), "\n")
+#Total de SNPs iniciales (gl6):       17554 
+
+cat("SNPs Outliers (>= 2 programas):     ", nLoc(gl6_OUTLIERS), "\n")
+#SNPs Outliers (>= 2 programas):      317 
+
+cat("SNPs Zona Gris (Descartados):       ", length(loci_zona_gris), "\n")
+#SNPs Zona Gris (Descartados):        6005 
+
+cat("SNPs Neutros candidatos (0 prog):   ", nLoc(gl_preNeut), "\n")
+#SNPs Neutros candidatos (0 prog):    11232 
+
+cat("======================================================\n\n")
+
+gl6_NEUTRO$n.loc #11232
+
+# ==============================================================================
+# FILTROS POSTERIORES SOBRE EL DATASET NEUTRO (HWE y LD)
+# ==============================================================================
+# Then, filter de neutral dataset by HWE y LD. Para tener los neutrales
 
 # --- 2. HWE --- elimina locis que pueden afectar al FST y no se ajustan al HWE
 
-
 gl_hwe <- gl.filter.hwe(gl_preNeut, subset = "each", alpha_val = 0.05, 
                         multi_comp = TRUE, multi_comp_method = "fdr")
-nLoc(gl_hwe) # 
+nLoc(gl_hwe) # 11232
 
 
 # --- 3. Filter by Linkage desequilibrium (LD) using plink ---
+# 1. Crear la carpeta si no existe y exportar los archivos de gl_hwe
+plink_dir <- "C:/Users/eamy1/OneDrive/Escritorio/plink_win64"
 
-# Create folder "plink_LD"
-dir.create("plink_LD")
-
-"C:\Users\eamy1\OneDrive\Escritorio\plink_win64\plink.exe"
-# export to plink format
-gl2plink(gl_hwe, plink_path = "C:/Users/Lab/Downloads/plink_win64_20230116",
+gl2plink(gl_hwe, 
+         plink_path = plink_dir,
          bed_file = TRUE,
          outfile = "gl_plink",
-         outpath = "./plink_LD/")
+         outpath = plink_dir)
+
+#-------------------------------------------------------------------------------
+#2 USAR CONSOLA
+
+cd C:\Users\eamy1\OneDrive\Escritorio\plink_win64
+
+.\plink.exe --bfile gl_plink --indep-pairwise 50 10 0.5 --out LD_results
 
 
+#-------------------------------------------------------------------------------
+# 3. Definir la ruta del archivo generado por PLINK
+prune_file <- "C:/Users/eamy1/OneDrive/Escritorio/plink_win64/LD_results.prune.out"
 
-# --- Execute plink to remove linked loci ---
-
-# ARCHIVOS .BED .FAM y .BIM DEBEN ESTAR EN LA CARPETA DONDE ESTA EL EJECUTABLE
-# DE PLINK
-#   Open your terminal.
-#   Navigate to your project folder where the executable and files are.
-#   Run the following command:
-
-#    .\plink.exe --bfile .\gl_plink --indep-pairwise 50 10 0.5 --out LD_results
-
-# What this does: Calculates LD in windows of 50 SNPs, shifting by 10 SNPs, 
-# and flags loci for removal if r2 is greater than 0.5 (50%).
-
-
-## LD_results.prune.out (file with pruned loci after ld filter of Plink).
-
-# 4. Drop Linked Loci 
-"C:\Users\eamy1\Downloads\Taller_SNPs_2026\Taller_SNPs_2026\LD_results.prune.out"
-linked_loci <- read.table("C:/Users/eamy1/Downloads/Taller_SNPs_2026/Taller_SNPs_2026/LD_results.prune.out", header = FALSE) 
+# 4. Cargar los loci identificados por PLINK para descarte
+linked_loci <- read.table(prune_file, header = FALSE)
 linked_loci <- as.vector(linked_loci[["V1"]])
+
+cat("Cantidad de loci a remover por LD:", length(linked_loci), "\n")
 head(linked_loci)
 
-gl_Neut <- gl.drop.loc(gl_hwe, loc.list =  linked_loci, verbose = 3) # remover 8
-gl_Neut # 
+# 5. Remover los loci ligados del conjunto filtrado por HWE
+gl_Neut <- gl.drop.loc(gl_hwe, loc.list = linked_loci, verbose = 3)
 
+# 6. Verificar las dimensiones finales de tu objeto neutro
+gl_Neut #11,133 SNPs, 92 individuos 
 
-# Save the final neutral Genlight object as RDS
-saveRDS(gl_Neut, file="gl_Neut.rds")
+# 7. Guardar el objeto neutro definitivo
+saveRDS(gl_Neut, file = "gl_Neut.rds")
+cat("¡Éxito! Objeto neutro guardado como 'gl_Neut.rds'\n")
 
-
-#script 4
-# Basic Analyses
-
-detach("package:dartR", unload = TRUE)
-library(dartRverse)
-
-
-# Set the working directory ----------------------------------------------
-
-setwd("C:/Users/name/Desktop/Taller_snps_2026")
-
-
-# Neutral Dataset ---------------------------------------------------------
-
+# Cargar los datos y guardarlos en una variable
 gl_Neut <- readRDS("gl_Neut.rds")
-gl_Neut #
-
 
 # Diversity ---------------------------------------------------------------
 
@@ -510,3 +608,5 @@ gl_Neut2$other$ind.metrics$lon
 gl_Neut2$other$ind.metrics$lat
 
 gl.map.interactive(gl_Neut2)
+
+
