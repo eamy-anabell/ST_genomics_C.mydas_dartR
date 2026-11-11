@@ -1,0 +1,2119 @@
+#script por ckusteres: norte (ME), Centro (CR) y Sur
+#setwd("C:/Users/eamy1/Downloads/ST/data/clusteres")
+setwd("C:/Users/eamy1/Downloads/ST/data")
+rm(list = ls())
+
+library(dartR)
+library(adegenet)
+
+# 1. Cargamos tu archivo de metadatos y limpiamos columnas
+test <- read.table("cm_pop.txt", header = TRUE)
+colnames(test) <- c("id", "pop")
+
+# 2. Cargar datos de DArT
+gl <- gl.read.dart(filename = "Report_DStu19-4381_SNP_mapping_1.csv", 
+                   ind.metafile = "meta_limpio.csv")
+
+# 3. Filtrar para conservar únicamente el morfotipo negro (NCEPGL)
+gl_negro <- gl.keep.pop(gl, pop.list = "NCEPGL")
+
+# ----------------------------------------------------------------------
+# INSPECCIÓN DEL DATASET DEL MORFO NEGRO (gl_negro)
+# ----------------------------------------------------------------------
+
+# 1. Ver el resumen básico de la estructura del objeto
+gl_negro
+
+# 2. Conteo rápido de cuántos individuos hay por cada población
+cat("=== CONTEO DE INDIVIDUOS POR POBLACIÓN ===\n")
+table(pop(gl_negro))
+
+# 3. Lista completa de nombres/IDs de los individuos
+cat("\n=== LISTA DE TODOS LOS INDIVIDUOS ===\n")
+indNames(gl_negro)
+
+# 4. Tabla cruzada: ID del individuo con su Población correspondiente
+df_individuos <- data.frame(
+  ID = indNames(gl_negro),
+  Poblacion = pop(gl_negro)
+)
+
+# Mostrar la tabla en la consola
+print(df_individuos)
+
+# (Opcional) Si prefieres ver la tabla de forma interactiva en RStudio:
+# View(df_individuos)
+
+# (Opcional) Para guardar la lista en un archivo Excel/CSV para revisar externamente:
+# write.csv(df_individuos, "lista_individuos_morfo_negro.csv", row.names = FALSE)
+
+# ----------------------------------------------------------------------
+# 5. REASIGNACIÓN DE LAS 8 POBLACIONES A LOS 3 GRUPOS REGIONALES
+# ----------------------------------------------------------------------
+
+# Guardamos las poblaciones originales por si las necesitas después
+pop(gl_negro) -> gl_negro@other$pop_original
+
+# Obtenemos el vector actual de poblaciones de cada individuo
+pobs <- as.character(pop(gl_negro))
+
+
+# 1. Volver a cargar el archivo especificando sep = ","
+meta_datos <- read.table("C:/Users/eamy1/Downloads/ST/data/cmiddata.txt", 
+                         header = TRUE, 
+                         sep = ",")
+
+# 2. Verificar que ahora sí se lean 3 columnas independientes (id, pop, gl)
+head(meta_datos)
+
+# 3. Filtrar para conservar únicamente el morfo negro (NCEPGL)
+# Nota: La 3ª columna es la que contiene "NCEPGL" o "SCWPGL"
+meta_negro <- subset(meta_datos, gl == "NCEPGL")
+
+# 4. Asignar las localidades (columna pop) a las métricas del genlight (gl_negro)
+gl_negro@other$ind.metrics$localidad <- meta_negro$pop[match(indNames(gl_negro), meta_negro$id)]
+
+# 5. Comprobar las localidades asignadas
+head(gl_negro@other$ind.metrics)
+table(gl_negro@other$ind.metrics$localidad)
+
+# 1. Verificar el número total de individuos en gl_negro
+nInd(gl_negro)
+
+# 2. Sumar el total de la tabla de localidades para confirmar
+sum(table(gl_negro@other$ind.metrics$localidad))
+
+
+
+# Asignar la localidad como la población activa dentro del genlight
+pop(gl_negro) <- as.factor(gl_negro@other$ind.metrics$localidad)
+
+# Reasignar a los 3 grupos regionales: ME, CR y Sur (IP, AT, AR, PE, NZ, GA)
+pobs <- as.character(pop(gl_negro))
+pobs_sur <- c("IP", "AT", "AR", "PE", "NZ", "GA")
+
+pobs_grupos <- ifelse(pobs == "ME", "ME",
+                      ifelse(pobs == "CR", "CR",
+                             ifelse(pobs %in% pobs_sur, "Sur", pobs)))
+
+# Asignar los nuevos 3 grupos regionales como la población oficial
+pop(gl_negro) <- as.factor(pobs_grupos)
+
+# Comprobar la distribución de los 104 individuos en los 3 grupos
+table(pop(gl_negro))
+
+## ==============================================================================
+## FILTROS DE CALIDAD (dartR) PARA EL MORFOTIPO NEGRO (gl_negro)
+## ==============================================================================
+
+# 1. Filtrado por reproducibilidad (RepAvg = 1.00)
+# Se conservan únicamente los loci con reproducibilidad perfecta
+gl1 <- gl.filter.reproducibility(gl_negro, threshold = 1.00, verbose = 3)
+cat("SNPs tras filtro de reproducibilidad:", nLoc(gl1), "\n")
+
+# 2. Filtrado por Frecuencia del Alelo Menor (MAF)
+# Filtra los alelos raros (por defecto en dartR el umbral es MAF >= 0.01 o según configuración de paquete)
+#gl2 <- gl.filter.maf(gl1, verbose = 3)
+#cat("SNPs tras filtro de MAF:", nLoc(gl2), "\n")
+
+# 3. Filtrado por Call Rate a nivel de Loci (loc)
+# Retiene loci con al menos el 85% de genotipado (máximo 15% de datos faltantes)
+gl3 <- gl.filter.callrate(gl1, method = "loc", threshold = 0.85, verbose = 3)
+cat("SNPs tras filtro de Call Rate por locus:", nLoc(gl3), "\n")
+gl3
+# 4. Filtrado por Call Rate a nivel de Individuo (ind)
+# Retiene individuos con al menos el 90% de genotipado (máximo 10% de datos faltantes)
+gl4 <- gl.filter.callrate(gl3, method = "ind", threshold = 0.90, recalc = TRUE, mono.rm = TRUE, verbose = 3)
+cat("Individuos retenidos:", nInd(gl4), "\n")
+cat("SNPs retenidos:", nLoc(gl4), "\n")
+
+# 5. Eliminación de loci monomórficos
+# Remueve cualquier locus que se haya vuelto fijo tras remover individuos o SNPs
+gl5 <- gl.filter.monomorphs(gl4, verbose = 3)
+cat("SNPs tras remover monomórficos:", nLoc(gl5), "\n")
+
+# 6. Eliminación de SNPs secundarios
+# Conserva solo un SNP por secuencia/tag de DArT para evitar ligamiento estricto
+gl6 <- gl.filter.secondaries(gl5, verbose = 3)
+cat("SNPs finales únicos (sin secundarios):", nLoc(gl6), "\n")
+
+# ------------------------------------------------------------------------------
+# RESPALDO Y VERIFICACIÓN FINAL
+# ------------------------------------------------------------------------------
+setwd("C:/Users/eamy1/Downloads/ST/data/clusteres")
+# Guardar el objeto filtrado en formato RDS
+saveRDS(gl6, file = "gl6_negro_clusteres_sin_maf.rds")
+
+# Resumen numérico del dataset final
+cat("\n=== RESUMEN DEL DATASET FILTRADO ===\n")
+cat("Número total de loci/SNPs retenidos:", nLoc(gl6), "\n")
+cat("Número total de individuos retenidos:", nInd(gl6), "\n")
+cat("Número de grupos/poblaciones:", nPop(gl6), "\n\n")
+
+# Conteo de individuos por grupo/localidad
+table(pop(gl6))
+
+
+
+# Preliminary PCoA ----------------------------------------------------------
+
+# Cargar objeto filtrado previamente si no está en memoria
+setwd("C:/Users/eamy1/Downloads/ST/data/clusteres")
+gl6 <- readRDS("gl6_negro_clusteres_sin_maf.rds")
+table(pop(gl6))
+
+# Impute the remaining missing values
+# PCoA requires complete datasets. The 'neighbour' method imputes missing 
+# data based on the most similar individual.
+
+gl_imp <- gl.impute(gl6, method = "neighbour")
+
+# PCoA
+pcoa <- gl.pcoa(gl_imp, nfactors = 5)
+
+# Static PCoA Plot (asignado a p_pcoa para poder exportarlo con ggsave)
+p_pcoa <- gl.pcoa.plot(pcoa, gl6, ellipse = TRUE)
+
+# Interactive PCoA Plot
+gl.pcoa.plot(pcoa, gl6, interactive = TRUE, ellipse = TRUE)
+
+# Versión interactiva SIN ELIPSE
+g2 <- gl.pcoa.plot(pcoa, gl6,
+                   interactive = TRUE,
+                   xaxis       = 1,
+                   yaxis       = 2
+)
+
+# 3. Exportar en Full HD (300 DPI, 1920x1080 px) en la carpeta de clústeres
+ggsave(
+  filename = "C:/Users/eamy1/Downloads/ST/data/clusteres/PCoA_plot_clusteres.png", 
+  plot = p_pcoa,
+  width = 1920 / 300,        
+  height = 1080 / 300,        
+  dpi = 300,                  
+  units = "in"
+)
+
+# ------------------------------------------------------------------------------
+# Matriz de genotipos antes de imputar
+mat_gl6 <- as.matrix(gl6)
+
+# Número total de genotipos
+n_total <- length(mat_gl6)
+
+# Número de genotipos faltantes
+n_missing <- sum(is.na(mat_gl6))
+
+# Porcentaje de datos faltantes
+porcentaje_missing <- n_missing / n_total * 100
+
+cat("Total de genotipos:", n_total, "\n")
+cat("Genotipos faltantes:", n_missing, "\n")
+cat("Porcentaje de datos faltantes:",
+    round(porcentaje_missing, 2), "%\n")
+
+
+
+mat_gl6 <- as.matrix(gl6)
+
+# % de datos faltantes de cada individuo
+missing_ind <- rowMeans(is.na(mat_gl6)) * 100
+
+missing_df <- data.frame(
+  ID = indNames(gl6),
+  Poblacion = as.character(pop(gl6)),
+  Missing = missing_ind
+)
+
+# Resumen por población
+aggregate(
+  Missing ~ Poblacion,
+  data = missing_df,
+  FUN = function(x) c(
+    n = length(x),
+    media = mean(x),
+    mediana = median(x),
+    minimo = min(x),
+    maximo = max(x)
+  )
+)
+
+library(adegenet)
+library(dartR)
+library(ggplot2)
+
+# 1. Asegúrate de que tus muestras tengan asignada una población o grupo
+# (Reasignación/Confirmación a los 3 grupos regionales: ME, CR y Sur)
+pobs <- as.character(pop(gl_imp))
+pobs_sur <- c("IP", "AT", "AR", "PE", "NZ", "GA")
+
+pobs_grupos <- ifelse(pobs == "ME", "ME",
+                      ifelse(pobs == "CR", "CR",
+                             ifelse(pobs %in% pobs_sur, "Sur", pobs)))
+
+pop(gl_imp) <- as.factor(pobs_grupos)
+
+# Verificar que los 3 grupos estén asignados correctamente
+table(pop(gl_imp))
+
+# 1. Ejecutar el DAPC
+dapc_res <- dapc(gl_imp, n.pca = 10, n.da = 2)
+
+# 1. Definir la paleta de colores ajustada a los 3 grupos (ME, CR, Sur)
+# Se mantienen las claves originales por compatibilidad si trabajas con 8 localidades
+colores_pop <- c(
+  "ME"  = "#2E8B57", # Verde
+  "CR"  = "#EE6A50", # Naranja / Coral
+  "Sur" = "#7570B3", # Morado (agrupa IP, AT, AR, PE, NZ, GA)
+  # Claves por si alternas a las 8 localidades originales:
+  "PE"  = "#7570B3",
+  "IP"  = "#7570B3",
+  "NZ"  = "#7570B3",
+  "AR"  = "#7570B3",
+  "AT"  = "#7570B3",
+  "GA"  = "#7570B3"
+)
+
+# 2. Extraer las coordenadas del DAPC a un data.frame
+df_dapc <- as.data.frame(dapc_res$ind.coord)
+df_dapc$Poblacion <- pop(gl_imp)
+
+# 1. Guardar el gráfico de ggplot2 en una variable
+p <- ggplot(df_dapc, aes(x = LD1, y = LD2, color = Poblacion)) +
+  geom_vline(xintercept = 0, linetype = "solid", color = "gray50") +
+  geom_hline(yintercept = 0, linetype = "solid", color = "gray50") +
+  # Puntos reducidos
+  geom_point(size = 1, alpha = 0.8) +
+  # Elipses con trazo fino
+  stat_ellipse(level = 0.67, type = "norm", linewidth = 0.22) +
+  scale_color_manual(values = colores_pop) +
+  theme_bw() +
+  labs(
+    x = "DA Axis 1",
+    y = "DA Axis 2",
+    color = "Población"
+  ) +
+  theme(
+    panel.grid = element_blank(),
+    legend.position = "right",
+    legend.box.background = element_rect(color = "black", linewidth = 0.3),
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 10)
+  )
+
+# Mostrar en pantalla
+print(p)
+
+# 2. Exportar en Full HD
+ggsave(
+  filename = "DAPC1_plot_sin_maf.png", 
+  plot = p,
+  width = 1920 / 300,        
+  height = 1080 / 300,        
+  dpi = 300,                  
+  units = "in"
+)
+
+# 1. Obtener el número de PCs retenidos y la varianza retenida acumulada
+n_pcs <- dapc_res$n.pca
+var_retenida <- sum(dapc_res$var) * 100
+
+cat("Número de PCs retenidos:", n_pcs, "\n")
+cat("Porcentaje de varianza retenida:", round(var_retenida, 2), "%\n\n")
+
+# 2. Obtener el porcentaje de variación explicada por cada función discriminante (Ejes LD)
+var_eig <- dapc_res$eig / sum(dapc_res$eig) * 100
+
+cat("Varianza explicada por el Eje DA 1:", round(var_eig[1], 2), "%\n")
+cat("Varianza explicada por el Eje DA 2:", round(var_eig[2], 2), "%\n")
+
+
+
+
+# ==============================================================================
+# PIPELINE DE DETECCIÓN DE OUTLIERS CON ORGANIZACIÓN POR CARPETAS
+# DATASET: MORFO NEGRO (gl6)
+# ==============================================================================
+
+library(dartR)
+library(dplyr)
+library(pcadapt)
+library(fsthet)
+library(qvalue)
+library(adegenet)
+
+# 1. CREACIÓN Y DEFINICIÓN DE ESTRUCTURA DE CARPETAS
+# ------------------------------------------------------------------------------
+dir_general  <- "C:/Users/eamy1/Downloads/ST/data/clusteres"
+dir_bayescan <- "C:/Users/eamy1/Downloads/ST/data/clusteres/bayescan"
+dir_pcadapt  <- "C:/Users/eamy1/Downloads/ST/data/clusteres/pcadapt"
+dir_fsthet   <- "C:/Users/eamy1/Downloads/ST/data/clusteres/fsthet"
+
+# Crear carpetas si no existen
+carpetas <- c(dir_general, dir_bayescan, dir_pcadapt, dir_fsthet)
+for (folder in carpetas) {
+  if (!dir.exists(folder)) {
+    dir.create(folder, recursive = TRUE)
+  }
+}
+
+# 2. CARGA DE DATOS Y CONFIGURACIÓN
+# ------------------------------------------------------------------------------
+if (!exists("gl6")) {
+  gl6 <- readRDS(file.path(dir_general, "gl6_negro_clusteres_sin_maf.rd"))
+}
+
+Sys.setenv(PLINK_PATH = "C:/Users/eamy1/OneDrive/Escritorio/plink_win64/plink.exe")
+
+
+# ==============================================================================
+# METODO 1: BAYESCAN
+# ==============================================================================
+
+# A. Exportar el archivo al formato .gest directamente en la carpeta de BayeScan
+gl2bayescan(gl6, outfile = "datos_bayescan.gest", outpath = dir_bayescan)
+
+# B. Lectura y procesamiento de la salida de BayeScan
+# Ruta al archivo con el sufijo generado por tu corrida
+ruta_bayescan_out <- file.path(dir_bayescan, "output_loc_fst_fst.txt")
+
+if (file.exists(ruta_bayescan_out)) {
+  bs_res <- read.table(ruta_bayescan_out, header = TRUE)
+  bs_res$LocusName <- locNames(gl6)
+  
+  # Filtrar outliers (qval < 0.05)
+  bs_outliers_df <- bs_res %>% filter(qval < 0.05)
+  bs_outliers_names <- bs_outliers_df$LocusName
+  
+  # Guardar lista de outliers especificando "clusteres"
+  write.table(
+    bs_outliers_names,
+    file = file.path(dir_bayescan, "bayescan_outliers_clusteres.txt"),
+    row.names = FALSE, col.names = FALSE, quote = FALSE
+  )
+  
+  cat("Outliers detectados por BayeScan (qval < 0.05):", length(bs_outliers_names), "\n")
+  
+  # Exportar gráfico en la carpeta de BayeScan
+  png(file.path(dir_bayescan, "BayeScan_plot_clusteres.png"), width = 1920, height = 1080, res = 300)
+  bs_res$log10_qval <- -log10(bs_res$qval)
+  plot(bs_res$fst, bs_res$log10_qval,
+       xlab = "FST", ylab = "-log10(q-value)",
+       main = "BayeScan Clusteres: Candidate Outliers (FDR = 0.05)",
+       pch = 20, col = "grey")
+  abline(h = -log10(0.05), col = "red", lty = 2, lwd = 2)
+  points(bs_res$fst[bs_res$qval < 0.05], 
+         bs_res$log10_qval[bs_res$qval < 0.05], 
+         col = "red", pch = 19)
+  dev.off()
+} else {
+  warning("No se encontró el archivo output_loc_fst_fst.txt en la carpeta de BayeScan.")
+  bs_outliers_names <- character(0)
+}
+
+# ==============================================================================
+# METODO 2: PCADAPT
+# ==============================================================================
+
+# A. Convertir genotipos e importar a pcadapt
+gl_mat <- as.matrix(gl6)
+gl6_pcadapt <- read.pcadapt(t(gl_mat), type = "pcadapt")
+
+# B. Evaluación de K y guardado del Screeplot
+x_eval <- pcadapt(gl6_pcadapt, K = 10, min.maf = 0.01)
+
+png(file.path(dir_pcadapt, "PCAdapt_screeplot_clusteres_sin_maf.png"), width = 1920, height = 1080, res = 300)
+plot(x_eval, option = "screeplot")
+dev.off()
+
+# C. Ejecutar PCAdapt con K seleccionado (ej. K = 4) y extraer outliers
+x <- pcadapt(gl6_pcadapt, K = 4, min.maf = 0.01)
+qval <- qvalue(x$pvalues)$qvalues
+out_pcadapt_idx <- which(qval < 0.05)
+out_pcadapt_names <- locNames(gl6)[out_pcadapt_idx]
+
+# D. Guardar lista de outliers en la carpeta pcadapt
+write.table(
+  out_pcadapt_names,
+  file = file.path(dir_pcadapt, "pcadapt_outliers_clusteres_sin_maf.txt"),
+  row.names = FALSE, col.names = FALSE, quote = FALSE
+)
+
+cat("Outliers detectados por PCAdapt:", length(out_pcadapt_names), "\n")
+
+
+# ==============================================================================
+# METODO 3: FSTHET
+# ==============================================================================
+
+# A. Preparar matriz compatible
+gi6 <- gl2gi(gl6, verbose = 0)
+df_fsthet <- genind2df(gi6, sep = "/")
+df_fsthet <- cbind(pop = pop(gl6), df_fsthet)
+
+# B. Ejecutar fsthet
+fsts_res <- fsthet(df_fsthet, alpha = 0.05)
+
+# C. Extraer outliers
+if ("outlier" %in% colnames(fsts_res)) {
+  out_fsthet_df <- fsts_res %>% filter(outlier == TRUE)
+} else if ("Outlier" %in% colnames(fsts_res)) {
+  out_fsthet_df <- fsts_res %>% filter(Outlier == TRUE)
+} else if ("outliers" %in% colnames(fsts_res)) {
+  out_fsthet_df <- fsts_res %>% filter(outliers == TRUE)
+} else {
+  out_fsthet_df <- fsts_res %>% filter(Fst < CI.low | Fst > CI.high)
+}
+
+out_fsthet_names <- as.character(out_fsthet_df$Locus)
+
+# D. Guardar lista de outliers y resultados completos en la carpeta fsthet
+write.table(
+  out_fsthet_names,
+  file = file.path(dir_fsthet, "fsthet_outliers_clusteres_sin_maf.txt"),
+  row.names = FALSE, col.names = FALSE, quote = FALSE
+)
+
+write.table(
+  fsts_res,
+  file = file.path(dir_fsthet, "fsthet_resultados_clusteres_sin_maf.txt"),
+  row.names = FALSE, sep = "\t", quote = FALSE
+)
+
+cat("Outliers detectados por Fsthet:", length(out_fsthet_names), "\n")
+
+
+# 1. Exportar BayeScan
+write.table(
+  bs_outliers_names,
+  file = file.path(dir_bayescan, "bayescan_outliers_clusteres.txt"),
+  row.names = FALSE, col.names = FALSE, quote = FALSE
+)
+
+# 2. Exportar PCAdapt
+write.table(
+  out_pcadapt_names,
+  file = file.path(dir_pcadapt, "pcadapt_outliers_clusteres.txt"),
+  row.names = FALSE, col.names = FALSE, quote = FALSE
+)
+
+# 3. Exportar Fsthet
+write.table(
+  out_fsthet_names,
+  file = file.path(dir_fsthet, "fsthet_outliers_clusteres.txt"),
+  row.names = FALSE, col.names = FALSE, quote = FALSE
+)
+
+# ==============================================================================
+# CONSOLIDACIÓN Y CLASIFICACIÓN CONSERVADORA (CARPETA GENERAL)
+# ==============================================================================
+
+library(VennDiagram)
+library(grid)
+
+# 1. Carga estandarizada de las 3 listas de outliers (vectores limpios)
+bs_out <- if (file.exists(file.path(dir_bayescan, "bayescan_outliers_clusteres.txt"))) {
+  scan(file.path(dir_bayescan, "bayescan_outliers_clusteres.txt"), what = "character", quiet = TRUE)
+} else character(0)
+
+pcadapt_out <- if (file.exists(file.path(dir_pcadapt, "pcadapt_outliers_clusteres.txt"))) {
+  scan(file.path(dir_pcadapt, "pcadapt_outliers_clusteres.txt"), what = "character", quiet = TRUE)
+} else character(0)
+
+fsthet_out <- if (file.exists(file.path(dir_fsthet, "fsthet_outliers_clusteres.txt"))) {
+  scan(file.path(dir_fsthet, "fsthet_outliers_clusteres.txt"), what = "character", quiet = TRUE)
+} else character(0)
+
+# 2. Conteo de frecuencias por locus
+todos_outliers <- c(bs_out, pcadapt_out, fsthet_out)
+tabla_conteo   <- table(todos_outliers)
+
+# Categorización bajo criterio conservador:
+# (i)   Outliers Candidatos: detectados en >= 2 programas
+loci_outliers_final <- names(tabla_conteo[tabla_conteo >= 2])
+
+# (ii)  Zona Gris: detectados en exactamente 1 programa (se descartan)
+loci_zona_gris      <- names(tabla_conteo[tabla_conteo == 1])
+
+# (iii) Loci Neutros candidatos: detectados en 0 programas
+todos_los_loci      <- locNames(gl6)
+loci_neutros_final  <- setdiff(todos_los_loci, c(loci_outliers_final, loci_zona_gris))
+
+# 3. Filtrado y guardado seguro de objetos genlight
+
+# A. Dataset de Outliers (>= 2 programas)
+if (length(loci_outliers_final) > 0) {
+  gl6_OUTLIERS <- gl.keep.loc(gl6, loc.list = loci_outliers_final, verbose = 0)
+  saveRDS(gl6_OUTLIERS, file.path(dir_general, "gl6_OUTLIERS_conservador_clusteres.rds"))
+  cat("Genlight OUTLIERS guardado:", nLoc(gl6_OUTLIERS), "loci.\n")
+} else {
+  cat("Atención: Ningún SNP fue detectado simultáneamente en >= 2 programas.\n")
+  gl6_OUTLIERS <- NULL
+}
+
+# B. Dataset Neutro (se remueven outliers y loci de zona gris)
+if (length(c(loci_outliers_final, loci_zona_gris)) > 0) {
+  gl_preNeut <- gl.drop.loc(gl6, loc.list = c(loci_outliers_final, loci_zona_gris), verbose = 0)
+} else {
+  gl_preNeut <- gl6
+}
+saveRDS(gl_preNeut, file.path(dir_general, "gl_preNeut_conservador_clusteres.rds"))
+cat("Genlight NEUTRO guardado:", nLoc(gl_preNeut), "loci.\n")
+
+
+# ==============================================================================
+# DIAGRAMA DE VENN EN ALTA RESOLUCIÓN
+# ==============================================================================
+
+# 1. Instalar y cargar paquetes
+if (!requireNamespace("ggVennDiagram", quietly = TRUE)) {
+  install.packages("ggVennDiagram")
+}
+
+library(ggVennDiagram)
+library(ggplot2)
+
+# 2. Definir la lista de outliers
+lista_venn <- list(
+  BayeScan = bs_out,
+  PCAdapt  = pcadapt_out,
+  Fsthet   = fsthet_out
+)
+
+# 3. Generar el diagrama de Venn
+p_venn <- ggVennDiagram(lista_venn, label_alpha = 0) +
+  scale_fill_gradient(
+    low = "#F4FAFE",
+    high = "#4E79A7"
+  ) +
+  labs(
+    title = "Intersección de Outliers (Análisis por Clústeres)",
+    caption = "Aparición de SNPs candidatos entre métodos"
+  ) +
+  theme(
+    # Fondo blanco del gráfico
+    plot.background = element_rect(
+      fill = "white",
+      colour = NA
+    ),
+    
+    # Fondo blanco del panel
+    panel.background = element_rect(
+      fill = "white",
+      colour = NA
+    ),
+    
+    # Eliminar cuadrícula
+    panel.grid = element_blank(),
+    
+    # Título centrado
+    plot.title = element_text(
+      hjust = 0.5,
+      face = "bold",
+      size = 14
+    )
+  )
+
+# 4. Mostrar en RStudio
+print(p_venn)
+
+# 5. Exportar con fondo blanco
+ggsave(
+  filename = file.path(
+    dir_general,
+    "Venn_Outliers_Interseccion_clusteres.png"
+  ),
+  plot = p_venn,
+  width = 2000 / 300,
+  height = 2000 / 300,
+  dpi = 300,
+  units = "in",
+  bg = "white"
+)
+
+
+# ------------------------------------------------------------------------------
+# RESUMEN FINAL EN CONSOLA
+# ------------------------------------------------------------------------------
+cat("\n======================================================\n")
+cat("RESUMEN DE RESULTADOS (ANÁLISIS POR CLÚSTERES):\n")
+cat("======================================================\n")
+cat("Total de SNPs iniciales (gl6):    ", nLoc(gl6), "\n")
+cat("BayeScan outliers detectados:     ", length(bs_out), "\n")
+cat("PCAdapt outliers detectados:      ", length(pcadapt_out), "\n")
+cat("Fsthet outliers detectados:       ", length(fsthet_out), "\n")
+cat("------------------------------------------------------\n")
+cat("SNPs Outliers finales (>= 2 prog):", length(loci_outliers_final), "\n")
+cat("SNPs Zona Gris (Descartados):     ", length(loci_zona_gris), "\n")
+cat("SNPs Neutros candidatos (0 prog): ", length(loci_neutros_final), "\n")
+cat("======================================================\n\n")
+
+
+# ==============================================================================
+# FILTROS POSTERIORES SOBRE EL DATASET NEUTRO (HWE y LD) - CLUSTERES REGIONALES
+# ==============================================================================
+
+library(dartR)
+library(adegenet)
+library(ggplot2)
+
+# 1. Definición de rutas y directorios
+dir_general <- "C:/Users/eamy1/Downloads/ST/data/clusteres"
+plink_dir   <- "C:/Users/eamy1/OneDrive/Escritorio/plink_win64"
+
+# 2. Carga del dataset candidato a neutro desde la carpeta general de clústeres
+ruta_preNeut <- file.path(dir_general, "gl_preNeut_conservador_clusteres.rds")
+
+if (file.exists(ruta_preNeut)) {
+  gl_preNeut <- readRDS(ruta_preNeut)
+} else if (exists("gl_preNeut")) {
+  cat("Usando el objeto gl_preNeut presente en memoria.\n")
+} else {
+  stop("No se encontró el archivo gl_preNeut_conservador_clusteres.rds en: ", dir_general)
+}
+
+cat("Loci candidatos neutros iniciales:", nLoc(gl_preNeut), "\n")
+
+
+# ------------------------------------------------------------------------------
+# FILTRO 1: EQUILIBRIO DE HARDY-WEINBERG (HWE)
+# ------------------------------------------------------------------------------
+# Elimina loci que se desvían de HWE por población (FDR = 0.05)
+gl_hwe <- gl.filter.hwe(gl_preNeut, subset = "each", alpha_val = 0.05, 
+                        multi_comp = TRUE, multi_comp_method = "fdr", verbose = 3)
+
+cat("Loci retenidos tras filtro de HWE:", nLoc(gl_hwe), "\n")
+
+
+# ------------------------------------------------------------------------------
+# FILTRO 2: DESEQUILIBRIO DE LIGAMIENTO (LD) CON PLINK
+# ------------------------------------------------------------------------------
+
+# A. Exportar archivos para PLINK
+gl2plink(gl_hwe, 
+         plink_path = plink_dir,
+         bed_file   = TRUE,
+         outfile    = "gl_plink_clusteres",
+         outpath    = plink_dir)
+
+# B. Ejecución en consola/terminal de PLINK (Comando de referencia para tu terminal):
+#cd C:\Users\eamy1\OneDrive\Escritorio\plink_win64
+#.\plink.exe --bfile gl_plink_clusteres --indep-pairwise 50 10 0.5 --out LD_results_clusteres
+
+# ------------------------------------------------------------------------------
+# 3. LECTURA DE RESULTADOS DE PLINK Y FILTRADO FINAL
+# ------------------------------------------------------------------------------
+prune_file <- file.path(plink_dir, "LD_results_clusteres.prune.out")
+
+# Cargar los 718 loci identificados por PLINK
+linked_loci <- read.table(prune_file, header = FALSE)
+linked_loci <- as.vector(linked_loci[["V1"]])
+
+cat("Cantidad de loci a remover por LD:", length(linked_loci), "\n")
+
+# Remover los loci ligados
+gl_Neut <- gl.drop.loc(gl_hwe, loc.list = linked_loci, verbose = 3)
+
+# Guardar el objeto neutro definitivo
+saveRDS(gl_Neut, file = file.path(dir_general, "gl_Neut_clusteres.rds"))
+cat("¡Éxito! Objeto neutro definitivo guardado. Loci finales:", nLoc(gl_Neut), "\n")
+
+
+#-------------------------------------------------------------------------------
+# Individuos por clúster en gl6
+table(pop(gl6))
+
+# Individuos por clúster en pre-neutrales
+table(pop(gl_preNeut))
+
+# Individuos por clúster en neutrales
+table(pop(gl_Neut))
+
+
+
+# =====================================================
+# TABLA RESUMEN: INDIVIDUOS Y SNPs POR CLÚSTER
+# =====================================================
+
+# 1. Establecer directorio de trabajo
+setwd("C:/Users/eamy1/Downloads/ST/data/clusteres")
+
+# 2. Cargar paquetes
+library(adegenet)
+library(openxlsx)
+
+# 3. Definir objetos
+objetos <- list(
+  gl6 = gl6,
+  PreNeutrales = gl_preNeut,
+  Neutrales = gl_Neut
+)
+
+# 4. Crear tabla resumen
+tabla_resumen <- do.call(
+  rbind,
+  lapply(names(objetos), function(nombre) {
+    
+    gl <- objetos[[nombre]]
+    
+    # Individuos por clúster
+    conteos <- table(
+      factor(
+        as.character(pop(gl)),
+        levels = c("ME", "CR", "Sur")
+      )
+    )
+    
+    data.frame(
+      Dataset = nombre,
+      ME = as.integer(conteos["ME"]),
+      CR = as.integer(conteos["CR"]),
+      Sur = as.integer(conteos["Sur"]),
+      Total_individuos = nInd(gl),
+      Total_SNPs = nLoc(gl)
+    )
+  })
+)
+
+# 5. Mostrar tabla en consola
+print(tabla_resumen)
+
+# 6. Exportar a Excel
+write.xlsx(
+  tabla_resumen,
+  file = "Resumen_Individuos_SNPs_Clusteres.xlsx",
+  rowNames = FALSE,
+  overwrite = TRUE
+)
+
+
+
+
+library(adegenet)
+
+# Individuos por clúster en cada objeto
+cat("\n--- gl6 ---\n")
+print(table(pop(gl6)))
+cat("Total:", nInd(gl6), "\n")
+
+cat("\n--- gl_preNeut ---\n")
+print(table(pop(gl_preNeut)))
+cat("Total:", nInd(gl_preNeut), "\n")
+
+cat("\n--- gl_hwe ---\n")
+print(table(pop(gl_hwe)))
+cat("Total:", nInd(gl_hwe), "\n")
+gl_hwe
+# Número de SNPs en cada objeto
+data.frame(
+  Objeto = c("gl6", "gl_preNeut", "gl_hwe"),
+  Individuos = c(
+    nInd(gl6),
+    nInd(gl_preNeut),
+    nInd(gl_hwe)
+  ),
+  SNPs = c(
+    nLoc(gl6),
+    nLoc(gl_preNeut),
+    nLoc(gl_hwe)
+  )
+)
+
+# ------------------------------------------------------------------------------
+# 4. EJECUTAR PCoA Y DAPC (DATASET NEUTRO DEFINITIVO)
+# ------------------------------------------------------------------------------
+# Establecer theme_bw como tema global de ggplot2
+theme_set(theme_bw())
+
+# Imputación por vecino más cercano
+gl_impu <- gl.impute(gl_Neut, method = "neighbour")
+
+# A. PCoA Neutro
+pcoa <- gl.pcoa(gl_impu, nfactors = 5)
+p_pcoa_neut <- gl.pcoa.plot(pcoa, gl_Neut, ellipse = TRUE)
+
+# Guardar la imagen
+ggsave(
+  filename = file.path(dir_general, "PCoA2_neutro_clusteres.png"), 
+  plot     = p_pcoa_neut,
+  width    = 1920 / 300,        
+  height   = 1080 / 300,        
+  dpi      = 300,                  
+  units    = "in",
+  bg       = "white"
+)
+
+
+# B. DAPC Neutro
+dapc_rest <- dapc(gl_impu, n.pca = 10, n.da = 2)
+
+colores_pop <- c("ME" = "#2E8B57", "CR" = "#EE6A50", "Sur" = "#7570B3")
+
+df_dapc <- as.data.frame(dapc_rest$ind.coord)
+df_dapc$Poblacion <- pop(gl_impu)
+
+d <- ggplot(df_dapc, aes(x = LD1, y = LD2, color = Poblacion)) +
+  geom_vline(xintercept = 0, linetype = "solid", color = "gray50") +
+  geom_hline(yintercept = 0, linetype = "solid", color = "gray50") +
+  geom_point(size = 1.2, alpha = 0.8) +
+  stat_ellipse(level = 0.67, type = "norm", linewidth = 0.3) +
+  scale_color_manual(values = colores_pop) +
+  theme_bw() +
+  labs(x = "DA Axis 1", y = "DA Axis 2", color = "Población") +
+  theme(panel.grid = element_blank(), legend.position = "right")
+
+print(d)
+
+ggsave(
+  filename = file.path(dir_general, "DAPC_neutro_clusteres_FullHD.png"), 
+  plot     = d,
+  width    = 1920 / 300,        
+  height   = 1080 / 300,        
+  dpi      = 300,                  
+  units    = "in"
+)
+
+
+
+gl_hwe
+# ============================================================
+# ANÁLISIS DE DIVERSIDAD GENÉTICA (DATASET NEUTRO - CLÚSTERES)
+# MORFOTIPO NEGRO - ME / CR / SUR
+# ============================================================
+
+library(dartR)
+library(adegenet)
+library(openxlsx)
+
+# 1. Definición de directorios y carga de datos
+dir_general <- "C:/Users/eamy1/Downloads/ST/data/clusteres"
+ruta_gl_neut <- file.path(dir_general, "gl_Neut_clusteres.rds")
+
+if (file.exists(ruta_gl_neut)) {
+  gl_Neut <- readRDS(ruta_gl_neut)
+} else if (!exists("gl_Neut")) {
+  stop("No se encontró el objeto 'gl_Neut_clusteres.rds' en: ", dir_general)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+# ============================================================
+# 1. AGRUPAR LOCALIDADES EN TRES CLÚSTERES
+# ============================================================
+
+library(dartR)
+library(adegenet)
+
+# Revisar localidades originales
+cat("Distribución original por localidad:\n")
+print(table(pop(gl_hwe)))
+
+# Crear una copia para conservar el objeto original
+gl_hwe_clusteres <- gl_hwe
+
+# Definir correspondencia localidad-clúster
+mapa_clusteres <- c(
+  "ME" = "ME",
+  "CR" = "CR",
+  "IP" = "Sur",
+  "AT" = "Sur",
+  "AR" = "Sur",
+  "PE" = "Sur",
+  "NZ" = "Sur",
+  "GA" = "Sur"
+)
+
+# Obtener localidades originales
+localidades <- as.character(pop(gl_hwe_clusteres))
+
+# Verificar que todas estén contempladas
+stopifnot(all(localidades %in% names(mapa_clusteres)))
+
+# Asignar clústeres
+pop(gl_hwe_clusteres) <- factor(
+  unname(mapa_clusteres[localidades]),
+  levels = c("ME", "CR", "Sur")
+)
+
+# Comprobar distribución
+cat("\nDistribución por clúster:\n")
+print(table(pop(gl_hwe_clusteres)))
+
+# Comprobar individuos y SNPs
+cat("\nIndividuos:", nInd(gl_hwe_clusteres), "\n")
+cat("SNPs:", nLoc(gl_hwe_clusteres), "\n")
+
+dir_general <- "C:/Users/eamy1/Downloads/ST/data/clusteres"
+
+dir.create(dir_general, recursive = TRUE, showWarnings = FALSE)
+
+saveRDS(
+  gl_hwe_clusteres,
+  file.path(dir_general, "gl_hwe_clusteres.rds")
+)
+
+
+
+
+
+
+
+
+
+
+#====================================================================
+# DIVERSIDAD GENÓMICA - gl_hwe
+# Ho | uHe | FIS
+# Riqueza alélica | Alelos raros | Alelos privados
+#====================================================================
+
+#--------------------------------------------------
+# 1. LIBRERÍAS
+#--------------------------------------------------
+
+library(dartR)
+library(adegenet)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(patchwork)
+
+#--------------------------------------------------
+# 2. DIRECTORIO Y OBJETO
+#--------------------------------------------------
+
+dir_general <- "C:/Users/eamy1/Downloads/ST/data/clusteres"
+
+dir.create(
+  dir_general,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+# Se asume que gl_hwe ya está cargado en RStudio
+stopifnot(exists("gl_hwe"))
+
+cat("Individuos originales:", nInd(gl_hwe), "\n")
+cat("SNPs originales:", nLoc(gl_hwe), "\n")
+
+print(table(pop(gl_hwe)))
+
+#--------------------------------------------------
+# 3. AGRUPACIÓN EN CLÚSTERES
+#--------------------------------------------------
+
+colores_pob <- c(
+  "ME"  = "#788FC1",
+  "CR"  = "#EEEE10",
+  "Sur" = "#CF7880"
+)
+
+orden_pob <- c("ME", "CR", "Sur")
+
+mapa_clusteres <- c(
+  "ME" = "ME",
+  "CR" = "CR",
+  "IP" = "Sur",
+  "AT" = "Sur",
+  "AR" = "Sur",
+  "PE" = "Sur",
+  "NZ" = "Sur",
+  "GA" = "Sur",
+  "Sur" = "Sur"
+)
+
+# Copiar objeto original
+gl_plot <- gl_hwe
+
+localidades <- as.character(pop(gl_plot))
+
+# Verificar que todas las localidades estén definidas
+stopifnot(
+  all(localidades %in% names(mapa_clusteres))
+)
+
+# Asignar clústeres
+pop(gl_plot) <- factor(
+  unname(mapa_clusteres[localidades]),
+  levels = orden_pob
+)
+
+# Distribución final
+n_pob <- table(pop(gl_plot))
+
+print(n_pob)
+
+stopifnot(all(n_pob > 0))
+
+# Comprobar que no cambió el número de individuos o SNPs
+stopifnot(
+  nInd(gl_plot) == nInd(gl_hwe),
+  nLoc(gl_plot) == nLoc(gl_hwe)
+)
+
+# Guardar objeto agrupado
+saveRDS(
+  gl_plot,
+  file.path(dir_general, "gl_hwe_clusteres.rds")
+)
+
+#--------------------------------------------------
+# 4. TEMA GENERAL
+#--------------------------------------------------
+
+tema_general <- theme_bw(base_size = 14) +
+  theme(
+    legend.position = "none",
+
+    plot.title = element_text(
+      hjust = 0.5,
+      face = "bold",
+      size = 16
+    ),
+
+    panel.border = element_blank(),
+
+    axis.text.x = element_text(
+      angle = 90,
+      hjust = 1,
+      vjust = 0.5,
+      face = "bold",
+      color = "black"
+    ),
+
+    panel.grid.major = element_line(
+      color = "grey85"
+    ),
+
+    panel.grid.minor = element_line(
+      color = "grey93"
+    )
+  )
+
+#--------------------------------------------------
+# 5. REPORTE DE HETEROCIGOSIDAD
+#--------------------------------------------------
+
+report_het <- gl.report.heterozygosity(
+  x = gl_plot,
+  method = "pop",
+  plot.display = FALSE,
+  error.bar = "SD",
+  verbose = 0
+)
+
+#--------------------------------------------------
+# 6. REPORTE DE RIQUEZA ALÉLICA
+#--------------------------------------------------
+
+rep_AR <- gl.report.allelerich(
+  x = gl_plot,
+  plot.display = FALSE,
+  error.bar = "SD"
+)
+
+#--------------------------------------------------
+# 7. EXTRAER HETEROCIGOSIDAD
+#--------------------------------------------------
+
+datos_het <- bind_rows(
+
+  data.frame(
+    Poblacion = report_het$pop,
+    Indicador = "Ho",
+    Valor = report_het$Ho,
+    SD = report_het$HoSD
+  ),
+
+  data.frame(
+    Poblacion = report_het$pop,
+    Indicador = "He",
+    Valor = report_het$He,
+    SD = report_het$HeSD
+  ),
+
+  data.frame(
+    Poblacion = report_het$pop,
+    Indicador = "FIS",
+    Valor = report_het$FIS,
+    SD = report_het$FISSD
+  )
+)
+
+print(datos_het)
+
+
+#--------------------------------------------------
+# 8. EXTRAER RIQUEZA ALÉLICA
+#--------------------------------------------------
+
+resumen_AR <- rep_AR[["Allelic Richness per population"]]
+
+# Revisar nombres de columnas
+print(names(resumen_AR))
+
+# Extraer resultados
+datos_AR <- data.frame(
+  Poblacion = resumen_AR$pop,
+  Indicador = "Allelic richness",
+  Valor = resumen_AR$mean_corrected_richness,
+  SD = resumen_AR$SD
+)
+
+print(datos_AR)
+#--------------------------------------------------
+# 9. MATRIZ GENOTÍPICA
+#--------------------------------------------------
+
+# Genotipos codificados como 0, 1 y 2
+geno <- as.matrix(gl_plot)
+
+poblaciones <- as.character(pop(gl_plot))
+
+#--------------------------------------------------
+# 10. FRECUENCIAS ALÉLICAS POR CLÚSTER
+#--------------------------------------------------
+
+# Frecuencia del alelo codificado como 2
+# Se utiliza únicamente la información disponible
+
+frecuencias <- sapply(
+  orden_pob,
+  function(p) {
+
+    datos <- geno[
+      poblaciones == p,
+      ,
+      drop = FALSE
+    ]
+
+    n_observados <- colSums(!is.na(datos))
+
+    frec <- colSums(
+      datos,
+      na.rm = TRUE
+    ) / (2 * n_observados)
+
+    frec[n_observados == 0] <- NA_real_
+
+    frec
+  }
+)
+
+colnames(frecuencias) <- orden_pob
+
+#--------------------------------------------------
+# 11. ALELOS RAROS
+#--------------------------------------------------
+
+# Criterio: frecuencia alélica > 0 y < 0.05
+# Se consideran ambos alelos de cada SNP
+
+calcular_raros <- function(p) {
+
+  frec <- frecuencias[, p]
+
+  maf <- pmin(
+    frec,
+    1 - frec
+  )
+
+  data.frame(
+    Poblacion = p,
+    Indicador = "Rare alleles",
+    Valor = sum(
+      maf > 0 & maf < 0.05,
+      na.rm = TRUE
+    ),
+    SD = NA_real_
+  )
+}
+
+datos_raros <- bind_rows(
+  lapply(orden_pob, calcular_raros)
+)
+
+print(datos_raros)
+
+#--------------------------------------------------
+# 12. ALELOS PRIVADOS
+#--------------------------------------------------
+
+# Solo se consideran loci con datos observados
+# en los tres clústeres
+
+validos <- rowSums(
+  is.na(frecuencias)
+) == 0
+
+calcular_privados <- function(p) {
+
+  otras <- setdiff(orden_pob, p)
+
+  # Alelo codificado como 2:
+  # presente en p y ausente en los demás
+  privados_alt <- (
+    frecuencias[, p] > 0 &
+    rowSums(
+      frecuencias[, otras, drop = FALSE] > 0
+    ) == 0
+  )
+
+  # Alelo codificado como 0:
+  # presente en p y ausente en los demás
+  privados_ref <- (
+    frecuencias[, p] < 1 &
+    rowSums(
+      frecuencias[, otras, drop = FALSE] < 1
+    ) == 0
+  )
+
+  data.frame(
+    Poblacion = p,
+    Indicador = "Private alleles",
+    Valor = sum(
+      validos & (privados_alt | privados_ref),
+      na.rm = TRUE
+    ),
+    SD = NA_real_
+  )
+}
+
+datos_privados <- bind_rows(
+  lapply(orden_pob, calcular_privados)
+)
+
+print(datos_privados)
+
+#--------------------------------------------------
+# 13. UNIR LOS SEIS INDICADORES
+#--------------------------------------------------
+
+datos_finales <- bind_rows(
+  datos_het,
+  datos_AR,
+  datos_raros,
+  datos_privados
+)
+
+orden_indicadores <- c(
+  "Ho",
+  "He",
+  "FIS",
+  "Allelic richness",
+  "Rare alleles",
+  "Private alleles"
+)
+
+datos_finales$Poblacion <- factor(
+  datos_finales$Poblacion,
+  levels = orden_pob
+)
+
+datos_finales$Indicador <- factor(
+  datos_finales$Indicador,
+  levels = orden_indicadores
+)
+
+# Verificar tres clústeres por indicador
+conteos <- table(
+  datos_finales$Indicador,
+  datos_finales$Poblacion
+)
+
+print(conteos)
+
+stopifnot(all(conteos == 1))
+
+print(datos_finales)
+
+#--------------------------------------------------
+# 14. FUNCIÓN PARA CREAR GRÁFICOS
+#--------------------------------------------------
+
+crear_grafico <- function(indicador) {
+
+  datos_panel <- datos_finales %>%
+    filter(Indicador == indicador)
+
+  ggplot(
+    datos_panel,
+    aes(
+      x = Poblacion,
+      y = Valor,
+      fill = Poblacion
+    )
+  ) +
+
+    geom_col(
+      width = 0.9,
+      color = NA
+    ) +
+
+    geom_errorbar(
+      data = function(x) {
+        x[!is.na(x$SD), , drop = FALSE]
+      },
+      aes(
+        ymin = Valor,
+        ymax = Valor + SD
+      ),
+      width = 0.20,
+      linewidth = 0.5,
+      color = "black"
+    ) +
+
+    scale_fill_manual(
+      values = colores_pob,
+      breaks = orden_pob
+    ) +
+
+    scale_x_discrete(
+      limits = orden_pob,
+      labels = function(x) {
+        paste0(
+          x,
+          " | ",
+          as.integer(n_pob[x])
+        )
+      }
+    ) +
+
+    labs(
+      title = indicador,
+      x = NULL,
+      y = NULL
+    ) +
+
+    tema_general
+}
+
+#--------------------------------------------------
+# 15. CREAR LOS SEIS GRÁFICOS
+#--------------------------------------------------
+
+grafico_Ho <- crear_grafico("Ho")
+
+grafico_He <- crear_grafico("He")
+
+grafico_FIS <- crear_grafico("FIS")
+
+grafico_AR <- crear_grafico("Allelic richness")
+
+grafico_raros <- crear_grafico("Rare alleles")
+
+grafico_privados <- crear_grafico("Private alleles")
+
+#--------------------------------------------------
+# 16. COMBINAR EN DOS FILAS
+#--------------------------------------------------
+
+grafico_final <- (
+  (
+    grafico_Ho |
+    grafico_He |
+    grafico_FIS
+  ) /
+  (
+    grafico_AR |
+    grafico_raros |
+    grafico_privados
+  )
+) +
+  plot_annotation(
+    title = "Genetic Diversity by Cluster",
+    subtitle = "SNPs retained after HWE filtering",
+    theme = theme(
+      plot.title = element_text(
+        hjust = 0.5,
+        face = "bold",
+        size = 18
+      ),
+      plot.subtitle = element_text(
+        hjust = 0.5,
+        size = 13
+      )
+    )
+  )
+
+print(grafico_final)
+
+#--------------------------------------------------
+# 17. GUARDAR FIGURAS
+#--------------------------------------------------
+
+ggsave(
+  filename = file.path(
+    dir_general,
+    "Genetic_Diversity_HWE_3x2.png"
+  ),
+  plot = grafico_final,
+  width = 14,
+  height = 9,
+  dpi = 300,
+  bg = "white"
+)
+
+ggsave(
+  filename = file.path(
+    dir_general,
+    "Genetic_Diversity_HWE_3x2.pdf"
+  ),
+  plot = grafico_final,
+  width = 14,
+  height = 9,
+  bg = "white"
+)
+
+#--------------------------------------------------
+# 18. GUARDAR RESULTADOS
+#--------------------------------------------------
+
+write.csv(
+  datos_finales,
+  file.path(
+    dir_general,
+    "Genetic_Diversity_HWE_Results.csv"
+  ),
+  row.names = FALSE
+)
+
+cat("\nAnálisis completado.\n")
+cat("Directorio:", dir_general, "\n")
+cat("Individuos:", nInd(gl_plot), "\n")
+cat("SNPs:", nLoc(gl_plot), "\n")
+
+
+
+
+# ============================================================
+# DAPC Y FST POR CLÚSTERES - gl_hwe
+# Chelonia mydas
+# ============================================================
+
+#--------------------------------------------------
+# 1. LIBRERÍAS
+#--------------------------------------------------
+
+library(dartR)
+library(adegenet)
+library(ggplot2)
+library(reshape2)
+library(openxlsx)
+
+#--------------------------------------------------
+# 2. DIRECTORIO DE TRABAJO
+#--------------------------------------------------
+
+dir_general <- "C:/Users/eamy1/Downloads/ST/data/clusteres"
+
+dir.create(
+  dir_general,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+#--------------------------------------------------
+# 3. PREPARAR OBJETO gl_hwe
+#--------------------------------------------------
+
+# Se asume que gl_hwe está cargado en RStudio
+stopifnot(exists("gl_hwe"))
+
+cat("\nLocalidades originales:\n")
+print(table(pop(gl_hwe)))
+
+# Crear copia
+gl_clusteres <- gl_hwe
+
+# Definir agrupación
+mapa_clusteres <- c(
+  "ME" = "ME",
+  "CR" = "CR",
+  "IP" = "Sur",
+  "AT" = "Sur",
+  "AR" = "Sur",
+  "PE" = "Sur",
+  "NZ" = "Sur",
+  "GA" = "Sur",
+  "Sur" = "Sur"
+)
+
+localidades <- as.character(pop(gl_clusteres))
+
+stopifnot(
+  all(localidades %in% names(mapa_clusteres))
+)
+
+orden_pob <- c("ME", "CR", "Sur")
+
+pop(gl_clusteres) <- factor(
+  unname(mapa_clusteres[localidades]),
+  levels = orden_pob
+)
+
+cat("\nIndividuos por clúster:\n")
+print(table(pop(gl_clusteres)))
+
+cat("\nNúmero de SNPs:\n")
+print(nLoc(gl_clusteres))
+
+stopifnot(
+  all(table(pop(gl_clusteres)) > 0)
+)
+
+# Guardar objeto agrupado
+saveRDS(
+  gl_clusteres,
+  file.path(
+    dir_general,
+    "gl_hwe_clusteres.rds"
+  )
+)
+
+# ============================================================
+# 4. DAPC
+# ============================================================
+
+# Imputación por vecino más cercano
+gl_impu <- gl.impute(
+  gl_clusteres,
+  method = "neighbour"
+)
+
+# Convertir a genind
+genind_imp <- gl2gi(gl_impu)
+
+cat("\nVerificación de clústeres en genind:\n")
+print(table(pop(genind_imp)))
+
+# Ejecutar DAPC
+set.seed(123)
+
+dapc_3clust <- dapc(
+  genind_imp,
+  n.pca = 10,
+  n.da = 2
+)
+
+# Colores de los tres clústeres
+colores_3clust <- c(
+  "ME"  = "#788FC1",
+  "CR"  = "#EEEE10",
+  "Sur" = "#CF7880"
+)
+
+# Exportar scatter plot
+png(
+  filename = file.path(
+    dir_general,
+    "DAPC_scatter_HWE_clusteres.png"
+  ),
+  width = 1920,
+  height = 1080,
+  res = 300
+)
+
+scatter(
+  dapc_3clust,
+  col = unname(colores_3clust[orden_pob]),
+  pch = 19,
+  cstar = 1,
+  cellipse = 1.5,
+  clabel = 1,
+  scree.da = TRUE,
+  scree.pca = FALSE,
+  posi.da = "bottomright",
+  bg = "white"
+)
+
+dev.off()
+
+# Guardar objeto DAPC
+saveRDS(
+  dapc_3clust,
+  file.path(
+    dir_general,
+    "DAPC_HWE_clusteres.rds"
+  )
+)
+
+
+# ============================================================
+# 5. FST POR PARES - CLÚSTERES
+# ============================================================
+
+library(dartR)
+library(adegenet)
+library(ggplot2)
+library(openxlsx)
+
+orden_pob <- c("ME", "CR", "Sur")
+
+set.seed(123)
+
+fst <- gl.fst.pop(
+  gl_clusteres,
+  nboots = 1000,
+  percent = 95
+)
+
+# ============================================================
+# 6. EXTRAER Y COMPLETAR MATRICES
+# ============================================================
+
+fst_mat <- as.matrix(fst$Fsts)
+p_mat <- as.matrix(fst$Pvalues)
+
+# Verificar nombres de clústeres
+stopifnot(
+  all(orden_pob %in% rownames(fst_mat)),
+  all(orden_pob %in% colnames(fst_mat)),
+  all(orden_pob %in% rownames(p_mat)),
+  all(orden_pob %in% colnames(p_mat))
+)
+
+# Ordenar matrices
+fst_mat <- fst_mat[orden_pob, orden_pob]
+p_mat <- p_mat[orden_pob, orden_pob]
+
+cat("\nMatriz FST original:\n")
+print(round(fst_mat, 4))
+
+cat("\nMatriz de valores p original:\n")
+print(round(p_mat, 4))
+
+#--------------------------------------------------
+# Completar valores desde ambos triángulos
+#--------------------------------------------------
+
+completar_matriz <- function(mat) {
+  
+  for (i in seq_len(nrow(mat))) {
+    
+    for (j in seq_len(ncol(mat))) {
+      
+      if (
+        i != j &&
+        is.na(mat[i, j]) &&
+        !is.na(mat[j, i])
+      ) {
+        mat[i, j] <- mat[j, i]
+      }
+      
+    }
+  }
+  
+  diag(mat) <- NA_real_
+  
+  return(mat)
+}
+
+fst_completa <- completar_matriz(fst_mat)
+p_completa <- completar_matriz(p_mat)
+
+cat("\nMatriz FST completa:\n")
+print(round(fst_completa, 4))
+
+cat("\nMatriz de valores p completa:\n")
+print(round(p_completa, 4))
+
+# Verificar simetría
+stopifnot(
+  isTRUE(all.equal(
+    fst_completa,
+    t(fst_completa)
+  )),
+  isTRUE(all.equal(
+    p_completa,
+    t(p_completa)
+  ))
+)
+
+# ============================================================
+# 7. CREAR TABLA DE COMPARACIONES POR PARES
+# ============================================================
+
+# Definir las tres comparaciones únicas
+pares <- data.frame(
+  Pop1 = c("ME", "ME", "CR"),
+  Pop2 = c("CR", "Sur", "Sur")
+)
+
+# Extraer FST y valores p
+tabla_pares <- pares
+
+tabla_pares$FST <- mapply(
+  function(a, b) fst_completa[a, b],
+  tabla_pares$Pop1,
+  tabla_pares$Pop2
+)
+
+tabla_pares$Pvalue <- mapply(
+  function(a, b) p_completa[a, b],
+  tabla_pares$Pop1,
+  tabla_pares$Pop2
+)
+
+# Verificar que las tres comparaciones tengan FST
+stopifnot(
+  !anyNA(tabla_pares$FST)
+)
+
+cat("\nComparaciones por pares:\n")
+print(tabla_pares)
+
+# ============================================================
+# 8. SIGNIFICANCIA ESTADÍSTICA
+# ============================================================
+
+tabla_pares$Significancia <- ifelse(
+  is.na(tabla_pares$Pvalue),
+  "",
+  ifelse(
+    tabla_pares$Pvalue < 0.001, "***",
+    ifelse(
+      tabla_pares$Pvalue < 0.01, "**",
+      ifelse(
+        tabla_pares$Pvalue < 0.05, "*", ""
+      )
+    )
+  )
+)
+
+# Etiqueta: FST + asteriscos
+tabla_pares$Etiqueta <- paste0(
+  sprintf("%.3f", tabla_pares$FST),
+  tabla_pares$Significancia
+)
+
+# Ordenar factores
+tabla_pares$Pop1 <- factor(
+  tabla_pares$Pop1,
+  levels = orden_pob
+)
+
+tabla_pares$Pop2 <- factor(
+  tabla_pares$Pop2,
+  levels = orden_pob
+)
+
+cat("\nTabla final de comparaciones:\n")
+print(tabla_pares)
+
+
+# ============================================================
+# 9. HEATMAP FST - TRIÁNGULO ESCALONADO
+# ============================================================
+
+library(ggplot2)
+
+# Mantener solo las comparaciones entre clústeres
+# Filas: ME, CR
+# Columnas: CR, Sur
+
+tabla_pares$Pop1 <- factor(
+  as.character(tabla_pares$Pop1),
+  levels = c("ME", "CR")
+)
+
+tabla_pares$Pop2 <- factor(
+  as.character(tabla_pares$Pop2),
+  levels = c("CR", "Sur")
+)
+
+# Crear heatmap
+p_fst <- ggplot(
+  tabla_pares,
+  aes(
+    x = Pop2,
+    y = Pop1,
+    fill = FST
+  )
+) +
+  
+  geom_tile(
+    color = "white",
+    linewidth = 0.8,
+    width = 1,
+    height = 1
+  ) +
+  
+  geom_text(
+    aes(label = Etiqueta),
+    color = "black",
+    size = 6,
+    fontface = "bold"
+  ) +
+  
+  scale_fill_gradient(
+    low = "#E0F2FE",
+    high = "#0369A1",
+    name = expression(F[ST])
+  ) +
+  
+  # Solo columnas con comparaciones
+  scale_x_discrete(
+    limits = c("CR", "Sur"),
+    drop = FALSE,
+    expand = expansion(mult = 0)
+  ) +
+  
+  # Solo filas con comparaciones
+  scale_y_discrete(
+    limits = c("CR", "ME"),
+    drop = FALSE,
+    expand = expansion(mult = 0)
+  ) +
+  
+  coord_fixed() +
+  
+  labs(
+    title = expression(
+      paste(
+        "Diferenciación genética por pares (",
+        F[ST],
+        ")"
+      )
+    ),
+    subtitle = "* p < 0.05, ** p < 0.01, *** p < 0.001",
+    x = NULL,
+    y = NULL
+  ) +
+  
+  theme_minimal() +
+  
+  theme(
+    plot.title = element_text(
+      face = "bold",
+      size = 18,
+      hjust = 0.5
+    ),
+    
+    plot.subtitle = element_text(
+      size = 13,
+      hjust = 0.5
+    ),
+    
+    axis.text.x = element_text(
+      angle = 45,
+      hjust = 1,
+      size = 15,
+      color = "black"
+    ),
+    
+    axis.text.y = element_text(
+      size = 15,
+      color = "black"
+    ),
+    
+    legend.title = element_text(size = 15),
+    legend.text = element_text(size = 13),
+    
+    panel.grid = element_blank(),
+    
+    panel.border = element_blank(),
+    
+    plot.background = element_rect(
+      fill = "white",
+      color = NA
+    )
+  )
+
+print(p_fst)
+
+# ============================================================
+# 10. EXPORTAR HEATMAP
+# ============================================================
+
+ggsave(
+  filename = file.path(
+    dir_general,
+    "FST_HWE_clusteres.png"
+  ),
+  plot = p_fst,
+  width = 7,
+  height = 6,
+  dpi = 300,
+  bg = "white"
+)
+
+ggsave(
+  filename = file.path(
+    dir_general,
+    "FST_HWE_clusteres.pdf"
+  ),
+  plot = p_fst,
+  width = 7,
+  height = 6,
+  bg = "white"
+)
+
+# ============================================================
+# 11. PREPARAR TABLAS PARA EXCEL
+# ============================================================
+
+# Matriz FST completa
+tabla_fst_excel <- data.frame(
+  Cluster = rownames(fst_completa),
+  round(fst_completa, 4),
+  check.names = FALSE
+)
+
+# Matriz de valores p completa
+tabla_p_excel <- data.frame(
+  Cluster = rownames(p_completa),
+  round(p_completa, 4),
+  check.names = FALSE
+)
+
+# Comparaciones individuales
+tabla_comparaciones <- tabla_pares[
+  ,
+  c(
+    "Pop1",
+    "Pop2",
+    "FST",
+    "Pvalue",
+    "Significancia"
+  )
+]
+
+# Resumen de muestras
+n_cluster <- table(pop(gl_clusteres))
+
+tabla_resumen <- data.frame(
+  Cluster = names(n_cluster),
+  Individuos = as.integer(n_cluster),
+  SNPs_HWE = nLoc(gl_clusteres),
+  Bootstrap = 1000,
+  Porcentaje = 95
+)
+
+# ============================================================
+# 12. EXPORTAR RESULTADOS A EXCEL
+# ============================================================
+
+excel_out <- file.path(
+  dir_general,
+  "FST_HWE_clusteres.xlsx"
+)
+
+wb <- createWorkbook()
+
+# Matriz FST
+addWorksheet(wb, "Matriz_FST")
+
+writeData(
+  wb,
+  "Matriz_FST",
+  tabla_fst_excel
+)
+
+# Matriz valores p
+addWorksheet(wb, "Matriz_Pvalues")
+
+writeData(
+  wb,
+  "Matriz_Pvalues",
+  tabla_p_excel
+)
+
+# Comparaciones
+addWorksheet(wb, "Comparaciones")
+
+writeData(
+  wb,
+  "Comparaciones",
+  tabla_comparaciones
+)
+
+# Resumen
+addWorksheet(wb, "Resumen")
+
+writeData(
+  wb,
+  "Resumen",
+  tabla_resumen
+)
+
+# Ajustar ancho de columnas
+for (hoja in names(wb)) {
+  
+  setColWidths(
+    wb,
+    sheet = hoja,
+    cols = 1:10,
+    widths = "auto"
+  )
+  
+}
+
+# Guardar Excel
+saveWorkbook(
+  wb,
+  file = excel_out,
+  overwrite = TRUE
+)
+
+# ============================================================
+# 13. GUARDAR OBJETOS Y RESULTADOS
+# ============================================================
+
+# Objeto original FST
+saveRDS(
+  fst,
+  file.path(
+    dir_general,
+    "FST_HWE_clusteres.rds"
+  )
+)
+
+# Matrices completas
+saveRDS(
+  list(
+    FST = fst_completa,
+    Pvalues = p_completa
+  ),
+  file.path(
+    dir_general,
+    "FST_HWE_matrices_completas.rds"
+  )
+)
+
+# Tabla de comparaciones
+write.csv(
+  tabla_comparaciones,
+  file.path(
+    dir_general,
+    "FST_HWE_comparaciones.csv"
+  ),
+  row.names = FALSE
+)
+
+cat("\n========================================\n")
+cat("ANÁLISIS FST FINALIZADO\n")
+cat("========================================\n")
+
+cat("Individuos:", nInd(gl_clusteres), "\n")
+cat("SNPs:", nLoc(gl_clusteres), "\n")
+
+cat("\nArchivos generados:\n")
+cat("- FST_HWE_clusteres.png\n")
+cat("- FST_HWE_clusteres.pdf\n")
+cat("- FST_HWE_clusteres.xlsx\n")
+cat("- FST_HWE_clusteres.rds\n")
+cat("- FST_HWE_matrices_completas.rds\n")
+cat("- FST_HWE_comparaciones.csv\n")
+
+cat("\nDirectorio:", dir_general, "\n")
+
